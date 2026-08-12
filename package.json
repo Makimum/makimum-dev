@@ -9,11 +9,13 @@
     "check": "tsc --noEmit && bun run src/page/tree.check.ts && bun run src/screens/tetris.check.ts && bun run src/lib/palette.check.ts"
   },
   "dependencies": {
+    "suncalc": "^2.0.1",
     "three": "^0.185.1",
     "three-mesh-bvh": "^0.9.14",
     "xatlas-three": "^0.2.1"
   },
   "devDependencies": {
+    "@types/suncalc": "^1.9.2",
     "@types/three": "^0.185.4",
     "typescript": "^5",
     "vite": "^7"
