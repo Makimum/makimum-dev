@@ -23,22 +23,34 @@ jobs:
         run: bun run check
 
       - name: build
-        run: bun run build
+        run: bun run build 2>&1 | tee build.log
 
       # The room shows its own bundle size on the monitor. If the build
       # moved and FACTS.bundleKB did not, the site is stating a number that
       # is no longer true — which this project treats as a failure, not a
       # cosmetic drift.
+      #
+      # ЧИСЛО БЕРЁТСЯ ИЗ ОТЧЁТА VITE, А НЕ СЧИТАЕТСЯ ЗАНОВО. Первая версия
+      # этого шага гоняла системный `gzip` по файлам в dist и получала 338
+      # против 342 у vite — четыре килобайта расхождения на ровном месте,
+      # потому что это разные реализации с разными настройками. Проверка
+      # падала, хотя константа была верной. Сверять надо с ТЕМ ЖЕ
+      # источником, из которого константу и переписывают руками.
       - name: bundle size matches the number the site displays
         run: |
           declared=$(grep -oE 'bundleKB: [0-9]+' src/screens/content.ts | grep -oE '[0-9]+')
-          actual=$(find dist -name '*.js' -o -name '*.html' | while read -r f; do
-            gzip -c "$f" | wc -c
-          done | awk '{s+=$1} END {printf "%.0f", s/1024}')
+          actual=$(grep -oE 'gzip: *[0-9.]+ kB' build.log \
+            | grep -oE '[0-9.]+' \
+            | awk '{s+=$1} END {printf "%.0f", s}')
           echo "объявлено в content.ts: ${declared} КБ"
-          echo "по свежей сборке:       ${actual} КБ"
+          echo "по отчёту vite:         ${actual} КБ"
+          if [ -z "$actual" ] || [ "$actual" = "0" ]; then
+            echo "::error::не удалось прочитать размеры из отчёта сборки"
+            exit 1
+          fi
           diff=$(( declared > actual ? declared - actual : actual - declared ))
-          if [ "$diff" -gt 3 ]; then
+          # Допуск 1 КБ — только на округление сумм, не на «примерно так».
+          if [ "$diff" -gt 1 ]; then
             echo "::error::FACTS.bundleKB = ${declared}, а сборка весит ${actual} КБ. Обновить константу."
             exit 1
           fi

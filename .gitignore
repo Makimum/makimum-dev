@@ -9,3 +9,4 @@ dist/
 .gstack/
 .superpowers/
 .playwright-mcp/
+build.log
