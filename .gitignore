@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.wrangler/
+# Конфиг запуска предпросмотра — привязан к порту конкретной машины,
+# в репозитории от него только конфликты. Дев-сервер живёт в ./dev.sh.
+.claude/
+.gstack/
+.superpowers/
+.playwright-mcp/

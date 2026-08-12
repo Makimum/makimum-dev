@@ -1,0 +1,44 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      # tsc + landing page tree + Tetris rules + room palette.
+      # No test framework: four plain scripts that need no browser.
+      - name: check
+        run: bun run check
+
+      - name: build
+        run: bun run build
+
+      # The room shows its own bundle size on the monitor. If the build
+      # moved and FACTS.bundleKB did not, the site is stating a number that
+      # is no longer true — which this project treats as a failure, not a
+      # cosmetic drift.
+      - name: bundle size matches the number the site displays
+        run: |
+          declared=$(grep -oE 'bundleKB: [0-9]+' src/screens/content.ts | grep -oE '[0-9]+')
+          actual=$(find dist -name '*.js' -o -name '*.html' | while read -r f; do
+            gzip -c "$f" | wc -c
+          done | awk '{s+=$1} END {printf "%.0f", s/1024}')
+          echo "объявлено в content.ts: ${declared} КБ"
+          echo "по свежей сборке:       ${actual} КБ"
+          diff=$(( declared > actual ? declared - actual : actual - declared ))
+          if [ "$diff" -gt 3 ]; then
+            echo "::error::FACTS.bundleKB = ${declared}, а сборка весит ${actual} КБ. Обновить константу."
+            exit 1
+          fi

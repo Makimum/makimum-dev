@@ -1,0 +1,42 @@
+MIT License
+
+Copyright (c) 2026 Maxim Fursov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+NOT COVERED BY THE MIT LICENSE ABOVE
+
+The licence covers the code. It does not cover the personal content that the
+code happens to display, and that content is not yours to reuse:
+
+  - the biography, résumé and project descriptions in
+    `src/screens/content.ts` and `docs/resume.md`
+  - the CV in `public/Maxim_Fursov_CV_EN.pdf`
+  - the photographs and screenshots in `public/` and `docs/media/`
+  - the name "Maxim Fursov", the domain makimum.dev, and any claim,
+    metric or achievement stated in that material
+
+Fork the room and keep the engine. Replace the content with your own before
+you publish anything. Presenting another person's résumé, photograph or track
+record as your own is not a licensing question.
+
+Third-party code is under its own terms: three.js (MIT), three-mesh-bvh (MIT),
+xatlas-three (MIT). See `package.json` and the respective packages.

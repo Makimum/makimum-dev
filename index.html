@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Maxim Fursov — makimum.dev</title>
+    <meta
+      name="description"
+      content="Maxim Fursov — builder. A procedural 3D room rendered in the browser: zero 3D assets, global illumination baked in your browser. Click the screens to open the projects, the VettaX pitch deck and how this room is made."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Maxim Fursov — makimum.dev" />
+    <meta
+      property="og:description"
+      content="Builder, based in Finland. VettaX, RiseFaceit, RookieAI — with the numbers. The site itself is a procedural 3D room rendered in the browser."
+    />
+    <meta property="og:url" content="https://makimum.dev/" />
+    <meta property="og:image" content="https://makimum.dev/room-hero.webp" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { height: 100%; overflow: hidden; background: #0b0e13; }
+
+      /* Гейт. Правило «страница или комната» живёт ТОЛЬКО в src/lobby.ts и
+         приезжает сюда как data-mode у <html>.
+         Умолчание — холст спрятан, и это не «на всякий случай»: до того как
+         модуль поставит data-mode, режим неизвестен, и показанный по
+         умолчанию холст мигнул бы чёрным поверх страницы на телефоне. */
+      #scene { display: none; }
+      html[data-mode="room"] #scene { display: block; width: 100vw; height: 100vh; }
+      /* Оверлеи комнаты спрятаны ПО УМОЛЧАНИЮ; показывает их main.ts —
+         атрибутом data-ready после первого отрисованного кадра. Причина:
+         data-mode переключается сразу, а main.ts доезжает через два кадра
+         и ~318 КБ чанка, и всё это время на чёрном висели пустая рамка
+         #hud (её прячет `hud.hidden = !DEBUG`, ещё не выполненная) и
+         #help. Атрибут переживает выход крестиком: повторный вход
+         показывает оверлеи сразу, чанк уже в памяти. */
+      #hud, #help, #room-loading { display: none; }
+      html[data-mode="room"][data-ready] #help { display: block; }
+      html[data-mode="room"][data-ready] #hud:not([hidden]) { display: block; }
+      /* Пока чанк едет — одна строка вместо чёрного экрана, и больше
+         ничего: прогресса у динамического импорта нет, а спиннер добавил
+         бы только анимацию. Уходит тем же атрибутом — по первому кадру,
+         а не по таймеру. */
+      html[data-mode="room"]:not([data-ready]) #room-loading {
+        display: flex;
+        position: fixed;
+        inset: 0;
+        align-items: center;
+        justify-content: center;
+        font: 400 13px ui-monospace, "SF Mono", Menlo, monospace;
+        color: #6e6b66;
+        pointer-events: none;
+      }
+      /* На странице скролл нужен, в комнате он ломает орбиту. */
+      html[data-mode="page"], html[data-mode="page"] body { height: auto; overflow: auto; }
+
+      /* Одно дерево, две шкуры. Шкуру выбирает ЭТО правило, а не JS: режим
+         меняется на лету, и дерево обязано переодеваться само.
+         Прячем через clip, а не display:none — скрытое через display
+         выпадает из дерева доступности вместе со всем содержимым.
+         `:not([data-mode])` — состояние «модуль ещё не отработал»: до него
+         страница не показывает ни того ни другого. */
+      html:not([data-mode]) #content,
+      html[data-mode="room"] #content {
+        position: absolute;
+        width: 1px; height: 1px;
+        margin: -1px; padding: 0; border: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+
+      /* --- Страница ---------------------------------------------------
+         Те же токены, что у экранов внутри комнаты: чернила #0b0e13,
+         единственный акцент #f47726 из питч-деки, моноширинный для
+         служебного, гротеск для человеческого. */
+      html[data-mode="page"] body {
+        color: #eae8e3;
+        font: 400 16px/1.6 -apple-system, BlinkMacSystemFont, Inter, system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      html[data-mode="page"] #content {
+        /* Боковой отступ живёт переменной: лента снимков выходит за колонку
+           ровно на него и обратно, и разъехаться они не могут. */
+        --pad: 20px;
+        max-width: 68ch;
+        margin: 0 auto;
+        padding: 28px var(--pad) 72px;
+      }
+      html[data-mode="page"] #content h1 { font: 600 32px/1.15 inherit; letter-spacing: -0.01em; }
+      html[data-mode="page"] #content .sub { color: #8c919c; margin-bottom: 26px; }
+      /* Заголовок раздела несёт себя сам. Раньше он был набран мелким
+         моноширинным капслоком в акцентном цвете и читался как надпись НАД
+         заголовком: связка «PROJECTS / VettaX» выглядела ярлыком и именем,
+         а не именем и подписью. Моноширинный в этом проекте принадлежит
+         числам и служебному, а не «технологичности» вообще. */
+      html[data-mode="page"] #content h2 {
+        margin: 56px 0 14px;
+        font: 600 24px/1.2 inherit;
+        letter-spacing: -0.015em;
+        color: #eae8e3;
+      }
+      html[data-mode="page"] #content section:first-of-type h2 { margin-top: 44px; }
+      html[data-mode="page"] #content h3 { margin: 22px 0 6px; font: 600 18px/1.3 inherit; }
+      html[data-mode="page"] #content h4 {
+        margin: 22px 0 6px;
+        font: 600 12px/1 ui-monospace, Menlo, monospace;
+        letter-spacing: 0.12em; text-transform: uppercase; color: #8c919c;
+      }
+      html[data-mode="page"] #content p { margin: 0 0 12px; color: #cec9c0; }
+      html[data-mode="page"] #content .lead { font-size: 19px; color: #eae8e3; }
+      html[data-mode="page"] #content .note {
+        border-left: 2px solid rgba(244,119,38,0.55);
+        padding-left: 13px; color: #8c919c; font-size: 15px;
+      }
+      html[data-mode="page"] #content ul { margin: 0 0 14px 18px; }
+      html[data-mode="page"] #content li { margin-bottom: 6px; color: #cec9c0; }
+      html[data-mode="page"] #content .metrics { list-style: none; margin: 14px 0; padding: 0; display: grid; gap: 10px; }
+      html[data-mode="page"] #content .metrics li { display: flex; gap: 10px; align-items: baseline; }
+      html[data-mode="page"] #content .metrics b { font: 600 22px/1 ui-monospace, Menlo, monospace; }
+      html[data-mode="page"] #content .metrics span { color: #8c919c; font-size: 14px; }
+      html[data-mode="page"] #content .stack { font: 400 14px ui-monospace, Menlo, monospace; color: #8c919c; }
+      html[data-mode="page"] #content hr { border: 0; border-top: 1px solid rgba(255,255,255,0.085); margin: 26px 0; }
+      html[data-mode="page"] #content .gap { height: 14px; }
+      html[data-mode="page"] #content .lnk { color: #f47726; text-decoration: none; border-bottom: 1px solid rgba(244,119,38,0.4); }
+      html[data-mode="page"] #content .btn {
+        /* min-height 44px — палец не попадает в цель меньше; padding один
+           даёт 41.5px по факту (line-height шрифта), поэтому высота задана явно. */
+        display: inline-flex; align-items: center; justify-content: center;
+        min-height: 44px; margin: 10px 0 4px; padding: 12px 18px;
+        font: 500 15px ui-monospace, Menlo, monospace;
+        color: #0b0e13; background: #f47726; border-radius: 8px; text-decoration: none;
+      }
+      /* Лента, а не столбик: столбиком шесть снимков занимали 2853 пикселя —
+         три с половиной экрана телефона. Прокрутка вбок — тот же жест,
+         которым и так смотрят фотографии, и она не отодвигает контакты. */
+      html[data-mode="page"] #content .shots {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 78%;
+        gap: 14px;
+        margin: 10px 0 6px;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+        /* Лента идёт от края до края, а не внутри колонки: обрезанный
+           справа снимок — это и есть приглашение листать. */
+        margin-inline: calc(-1 * var(--pad));
+        padding-inline: var(--pad);
+      }
+      html[data-mode="page"] #content .shots::-webkit-scrollbar { display: none; }
+      /* Кадры в ленте одной высоты. Снимки сняты в разных пропорциях, и по
+         своей высоте самый высокий растягивал строку сетки — под низкими
+         оставались дыры в полтораста пикселей. Общая рамка превращает ленту
+         в контактный лист, а не в лоскутное одеяло. */
+      html[data-mode="page"] #content .shots .shot {
+        scroll-snap-align: start;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+      /* Вписывание, а не обрезка: на этих снимках доказательство — само
+         число, и кадрирование под общую пропорцию рано или поздно срежет
+         именно его. Поля по краям честнее подрезанного пруфа. */
+      html[data-mode="page"] #content .shots .shot img {
+        aspect-ratio: 16 / 10;
+        object-fit: contain;
+        background: #05070a;
+      }
+      html[data-mode="page"] #content .shot { margin: 0; }
+      html[data-mode="page"] #content .shot img {
+        width: 100%; height: auto; display: block; border-radius: 10px;
+        border: 1px solid rgba(255,255,255,0.085); background: rgba(255,255,255,0.03);
+      }
+      /* Пропорция баннера наконец работает. Она лежала в данных с самого
+         начала (`--ratio` у блока `photo`, 0.4 — высота от ширины) и была
+         подписана как «баннер, а не портрет», но вёрстка её не читала:
+         снимок со сцены разворачивался на весь экран и отодвигал кнопку
+         резюме за кромку — на разделе, который ради этой кнопки и стоит
+         первым. */
+      html[data-mode="page"] #content .banner img {
+        aspect-ratio: 1 / var(--ratio, 0.5);
+        object-fit: cover;
+        /* 64%, а не середина: снимок вертикальный 900×1200, человек на нём
+           лежит между 50 и 71 процентом высоты (замерено по доле тёмных
+           пикселей в строке). Центрированная полоса ловила стену над ним. */
+        object-position: center 64%;
+      }
+      html[data-mode="page"] #content figcaption { margin-top: 7px; font-size: 14px; color: #8c919c; }
+      html[data-mode="page"] #content figcaption b { display: block; color: #eae8e3; font-weight: 600; }
+      html[data-mode="page"] #content .deck { margin: 44px 0 0; border-top: 1px solid rgba(255,255,255,0.085); padding-top: 18px; }
+      html[data-mode="page"] #content .deck summary {
+        cursor: pointer; font: 600 13px/1 ui-monospace, Menlo, monospace;
+        letter-spacing: 0.14em; text-transform: uppercase; color: #f47726;
+      }
+      /* Раскрытие: текст никуда не делся, он просто больше не требует
+         внимания у того, кто пришёл на две минуты. Подпись называет
+         действие, а не приглашает «узнать больше». */
+      html[data-mode="page"] #content .more { margin: 4px 0 8px; }
+      html[data-mode="page"] #content .more summary {
+        cursor: pointer;
+        width: fit-content;
+        padding: 8px 0;
+        font: 500 14px inherit;
+        color: #8c919c;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+        list-style: none;
+        transition: color 0.15s ease, border-color 0.15s ease;
+      }
+      html[data-mode="page"] #content .more summary::-webkit-details-marker { display: none; }
+      html[data-mode="page"] #content .more summary::after { content: " ↓"; }
+      html[data-mode="page"] #content .more[open] summary::after { content: " ↑"; }
+      html[data-mode="page"] #content .more summary:hover,
+      html[data-mode="page"] #content .more summary:focus-visible { color: #eae8e3; border-color: rgba(244, 119, 38, 0.55); }
+      html[data-mode="page"] #content .more > :not(summary) { margin-top: 10px; }
+      /* #5b616d давал 3.1:1 на этом фоне — ниже порога для текста. */
+      html[data-mode="page"] #content .tail { margin-top: 34px; color: #8c919c; font-size: 14px; }
+      #hero { display: none; }
+      /*
+       * Кадр своей же сцены (Хельсинки, комната в стартовой позе камеры),
+       * снят через отладочный хук `setSkyTime('2026-08-11T19:15')` — реальное
+       * время съёмки было 03:33, честная ночь давала почти чёрный кадр,
+       * а хук существует именно для подгонки под фото. Рецепт пересъёмки —
+       * docs/HANDOFF-2026-08-10.md, раздел «Как пользоваться файлами».
+       */
+      html[data-mode="page"] #hero {
+        display: block;
+        aspect-ratio: 16 / 9;
+        background: #0f131a url("/room-hero.webp") center / cover no-repeat;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.085);
+        /* Левый/правый отступ ПОВТОРЯЕТ padding #content (не max-width +
+           margin:auto — той же формулой центрируем невидимый 68ch-контейнер,
+           внутри которого текст ещё отступает на padding). Без второго
+           слагаемого край кадра и край текста расходятся: в узкой раскладке
+           #content на всю ширину и держит отступ только padding'ом, кадр
+           обязан повторить его отдельно; в широкой раскладке добавляется
+           центрирующий зазор (100% − 68ch) / 2, и оба отступа складываются. */
+        margin: 28px max(20px, calc((100% - 68ch) / 2 + 20px)) 0;
+      }
+      @media (min-width: 620px) {
+        html[data-mode="page"] #hero {
+          margin: 44px max(24px, calc((100% - 68ch) / 2 + 24px)) 0;
+        }
+      }
+      @media (min-width: 620px) {
+        html[data-mode="page"] #content { --pad: 24px; padding: 44px var(--pad) 96px; }
+        html[data-mode="page"] #content h1 { font-size: 40px; }
+        html[data-mode="page"] #content h2 { font-size: 28px; }
+        /* Шире экран — шире кадр в ленте, но лента остаётся лентой:
+           два снимка в ряд снова растянули бы раздел на два экрана. */
+        html[data-mode="page"] #content .shots { grid-auto-columns: 52%; }
+      }
+
+      /* --- Движение -----------------------------------------------------
+         Один авторский момент и сдержанная поддержка, а не одинаковый
+         выезд на каждом разделе.
+
+         АВТОРСКИЙ МОМЕНТ — шапка. Кадр приезжает чуть крупнее и садится
+         на место: это склейка «комната → страница», то есть ровно то, чем
+         сайт и является. Он играет один раз, при загрузке, и говорит
+         больше, чем любая подпись.
+
+         ПОДДЕРЖКА — проявление снимков и заголовков при подходе к ним.
+         Умолчание у всего ВИДИМОЕ: класс проявления вешает скрипт, и если
+         он не отработал, страница остаётся читаемой целиком.
+
+         Кривая одна на всё — экспоненциальное затухание: приезд уверенный,
+         без пружин и отскоков. */
+      @media (prefers-reduced-motion: no-preference) {
+        html[data-mode="page"] #hero {
+          animation: hero-settle 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+        html[data-mode="page"] #content h1,
+        html[data-mode="page"] #content .sub {
+          animation: name-rise 520ms cubic-bezier(0.16, 1, 0.3, 1) 90ms both;
+        }
+        html[data-mode="page"] .reveal {
+          opacity: 0;
+          transform: translateY(12px);
+          transition: opacity 320ms cubic-bezier(0.16, 1, 0.3, 1), transform 320ms cubic-bezier(0.16, 1, 0.3, 1);
+        }
+      }
+      /* Просьба уменьшить движение — это НЕ выключатель.
+         Тошноту вызывает смещение и масштаб, то есть намёк на собственное
+         перемещение; затухание его не вызывает и остаётся. Совсем убрать
+         переход хуже, чем смягчить: элементы начинают телепортироваться.
+         Поэтому по ступеням: у шапки уходит увеличение, у имени и
+         проявлений — сдвиг, а короткое затухание живёт в обоих случаях. */
+      @media (prefers-reduced-motion: reduce) {
+        html[data-mode="page"] #hero { animation: soft-fade 160ms ease both; }
+        html[data-mode="page"] #content h1,
+        html[data-mode="page"] #content .sub { animation: soft-fade 160ms ease 60ms both; }
+        html[data-mode="page"] .reveal {
+          opacity: 0;
+          transform: none;
+          transition: opacity 160ms ease;
+        }
+      }
+      html[data-mode="page"] .reveal.is-in { opacity: 1; transform: none; }
+      @keyframes hero-settle {
+        from { opacity: 0; transform: scale(1.06); }
+        to { opacity: 1; transform: none; }
+      }
+      @keyframes name-rise {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: none; }
+      }
+      @keyframes soft-fade {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      #enter-room { display: none; }
+      html[data-mode="page"] #enter-room {
+        display: block;
+        max-width: 68ch;
+        width: calc(100% - 40px);
+        margin: 14px auto 0;
+        padding: 15px 18px;
+        font: 500 15px ui-monospace, "SF Mono", Menlo, monospace;
+        color: #0b0e13;
+        background: #f47726;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+      }
+      #enter-room[disabled] { opacity: 0.55; }
+
+      /* Сообщение об отказе. Своё правило, а не класс `.note`: тот описан
+         только внутри `#content`, а этот абзац лежит рядом с кнопкой, вне
+         его. Полоса и приглушённый текст те же, чтобы отказ не выглядел
+         чужим на странице.
+         `:not([hidden])` обязателен: `display:block` из авторской таблицы
+         сильнее браузерного `[hidden] { display: none }`, и без него
+         сообщение висело бы всегда. */
+      #enter-failed { display: none; }
+      html[data-mode="page"] #enter-failed:not([hidden]) {
+        display: block;
+        max-width: 68ch;
+        width: calc(100% - 40px);
+        margin: 12px auto 0;
+        border-left: 2px solid rgba(244, 119, 38, 0.55);
+        padding-left: 13px;
+        color: #8c919c;
+        font-size: 15px;
+        line-height: 1.6;
+      }
+
+      #leave-room, #rotate-hint { display: none; }
+      /* Крестик — только там, где в комнату ВХОДИЛИ по кнопке. На десктопе
+         комната и есть сайт: посетитель никуда не входил, выхода тут
+         никогда и не было, а обратно на страницу его возвращает сам гейт —
+         слушатель resize в entry.ts зовёт leaveRoom(), когда окно сузили
+         ниже порога. */
+      @media (pointer: coarse) {
+        html[data-mode="room"] #leave-room {
+          display: block;
+          position: fixed;
+          top: max(12px, env(safe-area-inset-top));
+          right: max(12px, env(safe-area-inset-right));
+          width: 44px; height: 44px;
+          font: 400 22px/1 system-ui, sans-serif;
+          color: #eae8e3;
+          background: rgba(16, 16, 18, 0.72);
+          border: 1px solid rgba(255, 255, 255, 0.16);
+          border-radius: 22px;
+          z-index: 40;
+          cursor: pointer;
+        }
+      }
+      /* Карточка только в комнате и только в портрете — замер причины
+         лежит в спеке §2: при 390 × 844 лампа уезжает на −1.6 по NDC. */
+      @media (orientation: portrait) and (pointer: coarse) {
+        html[data-mode="room"] #rotate-hint {
+          display: flex;
+          position: fixed;
+          inset: 0;
+          z-index: 35;
+          flex-direction: column;
+          justify-content: center;
+          gap: 12px;
+          padding: 32px;
+          text-align: center;
+          color: #eae8e3;
+          background: rgba(11, 14, 19, 0.92);
+          font: 400 16px/1.55 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        }
+        html[data-mode="room"] #rotate-hint b { font-size: 20px; }
+      }
+
+      #hud {
+        position: fixed;
+        top: 14px;
+        left: 14px;
+        padding: 10px 13px;
+        font: 11px/1.65 ui-monospace, "SF Mono", Menlo, monospace;
+        color: #b9b6ae;
+        background: rgba(18, 18, 20, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-radius: 6px;
+        white-space: pre;
+        pointer-events: none;
+        backdrop-filter: blur(6px);
+      }
+      #help {
+        position: fixed;
+        bottom: 14px;
+        left: 14px;
+        font: 11px/1.7 ui-monospace, "SF Mono", Menlo, monospace;
+        color: #6e6b66;
+        pointer-events: none;
+      }
+      /* Две строки, потому что на пальце неверны все три части десктопной:
+         скролла нет (приближение — пинч, controls.touches.TWO =
+         DOLLY_ROTATE), а экраны намеренно не кликабельны — мобильный
+         реестр хотспотов это лампа и кресло (MOBILE_HOTSPOTS, спека §3).
+         Ветку выбирает CSS по указателю, а не JS: гейт режима в скриптах
+         живёт в одном месте (lobby.ts), и второго ему заводить нельзя, а
+         здесь речь не о режиме, а о том, чем посетитель тычет. */
+      #help .coarse { display: none; }
+      @media (pointer: coarse) {
+        #help .fine { display: none; }
+        #help .coarse { display: inline; }
+      }
+      .hotspot-label {
+        position: fixed;
+        top: 0;
+        left: 0;
+        padding: 5px 9px;
+        font: 11px/1 ui-monospace, "SF Mono", Menlo, monospace;
+        color: #f0ede6;
+        background: rgba(20, 20, 22, 0.86);
+        border-radius: 4px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.14s ease;
+        z-index: 20;
+      }
+      .focus-hint {
+        position: fixed;
+        bottom: 22px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 7px 14px;
+        font: 11px ui-monospace, Menlo, monospace;
+        color: #b6b1a8;
+        background: rgba(16, 16, 18, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 5px;
+        pointer-events: none;
+        z-index: 30;
+      }
+    </style>
+    <noscript>
+      <style>html:not([data-mode]) #content { position: static; width: auto; height: auto; margin: 0; clip: auto; clip-path: none; white-space: normal; }</style>
+    </noscript>
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <p id="room-loading">loading the room…</p>
+    <button id="leave-room" type="button" aria-label="Leave the room">×</button>
+    <div id="rotate-hint">
+      <p><b>Turn your phone</b></p>
+      <p>
+        The room is framed for a landscape screen — in portrait the lamp and half
+        the desk fall outside the shot.
+      </p>
+    </div>
+    <div
+      id="hero"
+      role="img"
+      aria-label="The room this site is made of: a desk, an ultrawide monitor, a lamp, and a window over Helsinki."
+    ></div>
+    <button id="enter-room" type="button" hidden>enter the room</button>
+    <p id="enter-failed" hidden>
+      The room did not load — it needs WebGL and about 320 KB. Everything it
+      contains is written out below.
+    </p>
+    <div id="hud"></div>
+    <div id="help">
+      <span class="fine">drag to orbit · scroll to zoom · click a screen to use it</span>
+      <span class="coarse">drag to orbit · pinch to zoom</span>
+    </div>
+
+    <script type="module" src="/src/entry.ts"></script>
+  </body>
+</html>
