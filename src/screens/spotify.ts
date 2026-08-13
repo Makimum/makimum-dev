@@ -136,6 +136,47 @@ export function trackUrl(): string {
   return live?.url ?? ''
 }
 
+/**
+ * Подменить то, что «играет», — для проверки вёрстки.
+ *
+ * Заведён по той же причине, что и `setWeather`: ждать в Хельсинки
+ * подходящей погоды, чтобы посмотреть на свой же шейдер, — не вариант, и
+ * ждать подходящего трека, чтобы посмотреть на свою же раскладку, тоже.
+ * Настоящие названия бывают вчетверо длиннее «This Room», с запятыми в
+ * составе исполнителей и с иероглифами; проверить это можно только
+ * подсунув такие данные руками.
+ *
+ * Без аргумента возвращает то, что реально приехало из сети.
+ */
+export function setNowPlaying(p?: Partial<Payload>) {
+  if (!p) {
+    live = null
+    changed = true
+    return null
+  }
+  const full: Payload = {
+    title: 'Untitled',
+    artist: '—',
+    album: '',
+    durationSec: 200,
+    url: '',
+    playing: true,
+    progressSec: 0,
+    recent: [],
+    ...p,
+  }
+  live = {
+    track: toTrack(full),
+    progressSec: full.progressSec,
+    at: performance.now(),
+    playing: full.playing,
+    url: full.url,
+    recent: full.recent,
+  }
+  changed = true
+  return full
+}
+
 /** Подключён ли настоящий Spotify. От этого зависит, что предлагать в
  *  фокусе: у встроенного трека ни списка, ни ссылки нет, и обещать их
  *  подписью было бы враньём. */

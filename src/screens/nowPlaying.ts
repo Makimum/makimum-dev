@@ -83,9 +83,23 @@ export function paintCover(
   y: number,
   size: number,
   seed: string,
+  /**
+   * Приглушённый вариант — для списка.
+   *
+   * На главном экране обложка одна и она главная, там насыщенность
+   * уместна. В списке их десять подряд, и на полной насыщенности они
+   * читаются РАДУГОЙ: глаз ловит цветные квадраты, а не названия. У
+   * настоящего приложения того же не происходит только потому, что там
+   * обложки настоящие и приглушены сами по себе. Гасим до уровня, на
+   * котором цвет остаётся опознавательным знаком строки, а не её
+   * содержанием.
+   */
+  muted = false,
 ) {
   const n = hash(seed)
   const hue = n % 360
+  const sat = muted ? 0.42 : 1
+  const lum = muted ? 0.62 : 1
   // Второй тон не случайный, а на треть круга дальше: две произвольные
   // краски рядом дают грязь, а треть круга — это всегда пара.
   const hue2 = (hue + 118) % 360
@@ -95,8 +109,8 @@ export function paintCover(
   ctx.clip()
 
   const g = ctx.createLinearGradient(x, y, x + size, y + size)
-  g.addColorStop(0, `hsl(${hue} 62% 26%)`)
-  g.addColorStop(1, `hsl(${hue2} 54% 12%)`)
+  g.addColorStop(0, `hsl(${hue} ${62 * sat}% ${26 * lum}%)`)
+  g.addColorStop(1, `hsl(${hue2} ${54 * sat}% ${12 * lum}%)`)
   ctx.fillStyle = g
   ctx.fillRect(x, y, size, size)
 
@@ -106,7 +120,7 @@ export function paintCover(
   const cy = y + size * (0.78 - ((n >> 12) & 15) / 70)
   const r = size * (0.52 + ((n >> 16) & 7) / 30)
   ctx.globalAlpha = 0.5
-  ctx.fillStyle = `hsl(${hue2} 66% 58%)`
+  ctx.fillStyle = `hsl(${hue2} ${66 * sat}% ${58 * lum}%)`
   ctx.beginPath()
   ctx.arc(cx, cy, r, 0, Math.PI * 2)
   ctx.fill()
@@ -518,7 +532,7 @@ export function paintQueue(
   tracked(ctx, 'RECENTLY PLAYED', pad, H * 0.125, W * 0.006)
 
   const top = H * 0.16
-  const rowH = H * 0.082
+  const rowH = H * 0.088
   const listH = H - top - H * 0.03
   const maxScroll = Math.max(0, songs.length * rowH - listH)
   const at = Math.min(Math.max(0, scroll), maxScroll)
@@ -540,12 +554,39 @@ export function paintQueue(
     // Крошечная обложка тем же процедурным мотивом: строка списка без
     // картинки читается как таблица, а не как музыка.
     const art = rowH * 0.66
-    paintCover(ctx, pad, y + (rowH - art) / 2, art, song.title)
+    paintCover(ctx, pad, y + (rowH - art) / 2, art, song.title, true)
+
+    // Длительность справа — она есть в данных, и без неё строка выглядит
+    // обрезанной: в любом плеере это второй столбец.
+    ctx.font = font(400, W * 0.024, UI.sans)
+    ctx.fillStyle = UI.faint
+    ctx.textAlign = 'right'
+    const dur = mmss(song.durationSec)
+    ctx.fillText(dur, W - pad, y + rowH * 0.58)
+    const durW = ctx.measureText(dur).width
+    ctx.textAlign = 'left'
 
     const tx = pad + art + W * 0.035
-    const maxW = W - tx - pad
-    fitText(ctx, song.title, tx, y + rowH * 0.44, maxW, W * 0.032, 600, UI.text)
-    fitText(ctx, song.artist, tx, y + rowH * 0.71, maxW, W * 0.026, 400, UI.dim)
+    const maxW = W - tx - pad - durW - W * 0.03
+    fitText(ctx, song.title, tx, y + rowH * 0.42, maxW, W * 0.032, 600, UI.text)
+    fitText(ctx, song.artist, tx, y + rowH * 0.72, maxW, W * 0.026, 400, UI.dim)
+
+    // Стрелка «наружу» — только у строки под курсором. Показывать её у
+    // всех значило бы забить список повторяющимся знаком; не показывать
+    // нигде — не сказать, что строка вообще куда-то ведёт.
+    if (hover === id && song.url) {
+      ctx.strokeStyle = UI.dim
+      ctx.lineWidth = Math.max(1.5, W * 0.0035)
+      ctx.lineCap = 'round'
+      const ax = W - pad - durW - W * 0.022
+      const ay = y + rowH * 0.5
+      const r = W * 0.011
+      ctx.beginPath()
+      ctx.moveTo(ax - r, ay - r)
+      ctx.lineTo(ax + r, ay)
+      ctx.lineTo(ax - r, ay + r)
+      ctx.stroke()
+    }
     hits.push({ id, x: 0, y, w: W, h: rowH })
   })
   ctx.restore()

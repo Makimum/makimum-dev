@@ -21,7 +21,7 @@ import { FACTS, resetDocCache } from './screens/content'
 import { isRoomOpen } from './lobby'
 import { mountContent } from './page/mount'
 import { createSky } from './sky/dome'
-import { startSpotify } from './screens/spotify'
+import { setNowPlaying, startSpotify } from './screens/spotify'
 import { createLampSwitch } from './props/lampSwitch'
 import { createChairSpin } from './props/chairSpin'
 import { skyState, sunTimes, warmTint, type SkyState } from './sky/time'
@@ -704,6 +704,12 @@ Object.assign(window as unknown as Record<string, unknown>, {
   lampOverridden: () => lampSwitch?.overridden(),
   /** Сила источника в канделах: подбирается на живой комнате. */
   lampPower: (v: number) => lampSwitch?.setPower(v),
+  /**
+   * Подмена трека на планшете — для проверки раскладки.
+   * `setNowPlaying({ title: '…', artist: '…', recent: [...] })`;
+   * без аргумента возвращает то, что приехало из сети.
+   */
+  setNowPlaying,
   weather: () => weather,
   /**
    * Подмена погоды для проверки облаков и осадков.
