@@ -21,6 +21,7 @@ import { FACTS, resetDocCache } from './screens/content'
 import { isRoomOpen } from './lobby'
 import { mountContent } from './page/mount'
 import { createSky } from './sky/dome'
+import { startSpotify } from './screens/spotify'
 import { createLampSwitch } from './props/lampSwitch'
 import { createChairSpin } from './props/chairSpin'
 import { skyState, sunTimes, warmTint, type SkyState } from './sky/time'
@@ -532,6 +533,12 @@ const chairSpin = createChairSpin(scene)
 
 // Режим фокуса: наведение, клик, подлёт камеры, панель с контентом
 const screens = new Screens(scene)
+
+// Живой Spotify на планшете. Поднимается здесь, а не внутри экрана:
+// опрос сети — это про комнату целиком, и он не должен начинаться от
+// того, что кто-то дошёл до отрисовки планшета. Не настроено или сети
+// нет — планшет играет встроенный трек и никто ничего не замечает.
+startSpotify()
 const focus = createFocus(
   scene,
   camera,

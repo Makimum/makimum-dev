@@ -76,6 +76,38 @@ frame, so hit regions cannot drift away from the pixels.
 
 <img src="docs/media/room-screen.webp" alt="The monitor showing a résumé document rendered entirely on canvas" width="100%">
 
+### The tablet plays real music
+
+The tablet runs a music player whose track comes from the Spotify Web API —
+what is actually playing, right now, with the progress head advancing in real
+time between polls. The album art stays **procedural**, generated from a hash
+of the real track title, because a cover fetched from someone else's servers
+would make the *zero assets* line on the front page untrue.
+
+The refresh token is a credential, so the call happens server-side in a
+Cloudflare Pages Function (`functions/api/now-playing.ts`), and only the
+fields the screen actually draws come back. Without the environment variables
+the endpoint returns `204` and the room plays a built-in track — a fork works
+out of the box and shows nothing broken.
+
+To wire up your own:
+
+```bash
+# 1. developer.spotify.com/dashboard → Create app
+#    Redirect URI exactly: http://127.0.0.1:8888/callback
+export SPOTIFY_CLIENT_ID=… SPOTIFY_CLIENT_SECRET=…
+node scripts/spotify-auth.mjs      # one-time, prints a refresh token
+
+# 2. store all three as Pages secrets (never in the repo)
+bunx wrangler pages secret put SPOTIFY_CLIENT_ID     --project-name=<project>
+bunx wrangler pages secret put SPOTIFY_CLIENT_SECRET --project-name=<project>
+bunx wrangler pages secret put SPOTIFY_REFRESH_TOKEN --project-name=<project>
+```
+
+Scopes requested: `user-read-currently-playing` and
+`user-read-recently-played`. Read-only, no playback control, no library
+access — the token cannot change anything in the account.
+
 ### Every number on screen is measured
 
 The room shows its own triangle count and bundle size. Neither is typed in by

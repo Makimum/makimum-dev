@@ -135,6 +135,39 @@ export interface ProgressBand {
   h: number
 }
 
+/**
+ * Написать строку, ужав кегль, пока она не влезет, и обрезав многоточием,
+ * если ужимать дальше некуда.
+ *
+ * Порог 0.62 от исходного кегля выбран не наугад: ниже него название
+ * перестаёт быть заголовком экрана и начинает читаться как подпись, а
+ * иерархия «название крупно, исполнитель мельче» рассыпается.
+ */
+function fitText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxW: number,
+  size: number,
+  weight: number,
+  colour: string,
+) {
+  ctx.fillStyle = colour
+  let s = size
+  ctx.font = font(weight, s, UI.sans)
+  while (ctx.measureText(text).width > maxW && s > size * 0.62) {
+    s -= size * 0.04
+    ctx.font = font(weight, s, UI.sans)
+  }
+  let out = text
+  if (ctx.measureText(out).width > maxW) {
+    while (out.length > 1 && ctx.measureText(out + '…').width > maxW) out = out.slice(0, -1)
+    out += '…'
+  }
+  ctx.fillText(out, x, y)
+}
+
 const mmss = (s: number) => {
   const m = Math.floor(s / 60)
   const sec = Math.floor(s % 60)
@@ -143,7 +176,7 @@ const mmss = (s: number) => {
 
 function icon(
   ctx: CanvasRenderingContext2D,
-  kind: 'prev' | 'next' | 'pause' | 'shuffle' | 'repeat',
+  kind: 'prev' | 'next' | 'pause' | 'play' | 'shuffle' | 'repeat',
   cx: number,
   cy: number,
   r: number,
@@ -160,6 +193,16 @@ function icon(
     const w = r * 0.28
     ctx.fillRect(cx - r * 0.42, cy - r * 0.6, w, r * 1.2)
     ctx.fillRect(cx + r * 0.14, cy - r * 0.6, w, r * 1.2)
+  } else if (kind === 'play') {
+    // Треугольник сдвинут вправо на десятую радиуса: у равностороннего
+    // треугольника центр тяжести не совпадает с геометрическим центром,
+    // и без сдвига он выглядит прижатым к левому краю круга.
+    ctx.beginPath()
+    ctx.moveTo(cx - r * 0.36 + r * 0.1, cy - r * 0.62)
+    ctx.lineTo(cx + r * 0.62 + r * 0.1, cy)
+    ctx.lineTo(cx - r * 0.36 + r * 0.1, cy + r * 0.62)
+    ctx.closePath()
+    ctx.fill()
   } else if (kind === 'prev' || kind === 'next') {
     const s = kind === 'next' ? 1 : -1
     // Два треугольника и планка — знак, который читается даже в 20 px.
@@ -215,6 +258,7 @@ export function paintProgress(
   background: CanvasGradient | string,
   track: Track,
   elapsed: number,
+  playing = true,
 ) {
   const pad = W * 0.085
   ctx.save()
@@ -236,10 +280,12 @@ export function paintProgress(
   ctx.fill()
   // Головка появляется только на воспроизведении — на паузе её и в
   // приложении нет, пока не тронешь дорожку.
-  ctx.beginPath()
-  ctx.arc(pad + barW * t, barY + barH / 2, barH * 1.7, 0, Math.PI * 2)
-  ctx.fillStyle = UI.text
-  ctx.fill()
+  if (playing) {
+    ctx.beginPath()
+    ctx.arc(pad + barW * t, barY + barH / 2, barH * 1.7, 0, Math.PI * 2)
+    ctx.fillStyle = UI.text
+    ctx.fill()
+  }
 
   ctx.font = font(500, W * 0.026, UI.sans)
   ctx.fillStyle = UI.dim
@@ -262,6 +308,7 @@ export function paintNowPlaying(
   track: Track,
   elapsed: number,
   clock: string,
+  playing = true,
 ): { band: ProgressBand; background: CanvasGradient } {
   const pad = W * 0.085
 
@@ -348,12 +395,13 @@ export function paintNowPlaying(
   const titleY = coverY + cover + H * 0.05
   ctx.textAlign = 'left'
   ctx.textBaseline = 'alphabetic'
-  ctx.font = font(700, W * 0.062, UI.sans)
-  ctx.fillStyle = UI.text
-  ctx.fillText(track.title, pad, titleY)
-  ctx.font = font(500, W * 0.038, UI.sans)
-  ctx.fillStyle = UI.dim
-  ctx.fillText(track.artist, pad, titleY + H * 0.036)
+  // ШРИФТ УЖИМАЕТСЯ ПОД ДЛИНУ. «This Room» влезал всегда, а настоящие
+  // названия бывают вчетверо длиннее и уезжали бы под сердце справа.
+  // Перенос на две строки тут не годится: под названием сразу идёт
+  // исполнитель, и вторая строка вытолкнула бы дорожку за край экрана.
+  const maxTitle = W - pad * 2 - W * 0.075
+  fitText(ctx, track.title, pad, titleY, maxTitle, W * 0.062, 700, UI.text)
+  fitText(ctx, track.artist, pad, titleY + H * 0.036, maxTitle, W * 0.038, 500, UI.dim)
 
   // Сердце справа — заполненное: свой же трек в библиотеке.
   const hx = W - pad
@@ -368,7 +416,7 @@ export function paintNowPlaying(
 
   // --- дорожка ---
   const band: ProgressBand = { y: titleY + H * 0.05, h: H * 0.075 }
-  paintProgress(ctx, W, band, bg, track, elapsed)
+  paintProgress(ctx, W, band, bg, track, elapsed, playing)
 
   // --- транспорт ---
   // Отступ 0.032, а не 0.045: при прежнем кнопка воспроизведения уходила
@@ -378,13 +426,14 @@ export function paintNowPlaying(
   const r = W * 0.045
   icon(ctx, 'shuffle', pad + r * 0.6, tY, r * 0.7, PLAY)
   icon(ctx, 'prev', W * 0.3, tY, r * 0.85, UI.text)
-  // Кнопка воспроизведения — белый круг с паузой: трек играет, значит
-  // нажатие его остановит, и знак обязан показывать именно это.
+  // Кнопка показывает, что произойдёт ПО НАЖАТИЮ, а не что происходит
+  // сейчас: играет — значит пауза, стоит — значит треугольник. Наоборот
+  // было бы враньём про собственное состояние.
   ctx.fillStyle = UI.text
   ctx.beginPath()
   ctx.arc(W / 2, tY, r * 1.25, 0, Math.PI * 2)
   ctx.fill()
-  icon(ctx, 'pause', W / 2, tY, r * 0.8, '#0b0e13')
+  icon(ctx, playing ? 'pause' : 'play', W / 2, tY, r * 0.8, '#0b0e13')
   icon(ctx, 'next', W * 0.7, tY, r * 0.85, UI.text)
   icon(ctx, 'repeat', W - pad - r * 0.6, tY, r * 0.7, UI.dim)
 

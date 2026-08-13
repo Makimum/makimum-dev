@@ -11,13 +11,8 @@ import {
 } from './paint'
 import { createTetris, type GameKey, type Phase, type Tetris } from './tetris'
 import { Panel } from './panel'
-import {
-  NOW_PLAYING,
-  elapsedAt,
-  paintNowPlaying,
-  paintProgress,
-  type ProgressBand,
-} from './nowPlaying'
+import { paintNowPlaying, paintProgress, type ProgressBand } from './nowPlaying'
+import { currentElapsed, currentTrack, isPlaying, trackChanged } from './spotify'
 
 /**
  * Экраны комнаты как маленькая операционная система.
@@ -425,8 +420,13 @@ export class NowPlaying {
   }
 
   flush(nowMs: number) {
-    const elapsed = elapsedAt(nowMs)
+    const track = currentTrack()
+    const elapsed = currentElapsed(nowMs)
+    const playing = isPlaying()
     const second = Math.floor(elapsed)
+    // Приехал другой трек — меняются обложка, название и длительность,
+    // то есть весь экран, а не полоса.
+    if (trackChanged()) this.full = true
 
     if (this.full) {
       this.full = false
@@ -435,9 +435,10 @@ export class NowPlaying {
         this.panel.ctx,
         this.panel.width,
         this.panel.height,
-        NOW_PLAYING,
+        track,
         elapsed,
         this.clock,
+        playing,
       )
       this.band = r.band
       this.background = r.background
@@ -447,7 +448,15 @@ export class NowPlaying {
 
     if (second === this.lastSecond || !this.band) return
     this.lastSecond = second
-    paintProgress(this.panel.ctx, this.panel.width, this.band, this.background, NOW_PLAYING, elapsed)
+    paintProgress(
+      this.panel.ctx,
+      this.panel.width,
+      this.band,
+      this.background,
+      track,
+      elapsed,
+      playing,
+    )
     this.panel.uploaded()
   }
 }
