@@ -23,14 +23,11 @@
  *     не подпадает.
  *     API/SDK — Web API.
  *
- *  2. Со страницы приложения взять Client ID и Client Secret и передать
- *     их скрипту переменными окружения, чтобы они не попали в историю
- *     команд оболочки:
- *
- *        read -rs SPOTIFY_CLIENT_ID
- *        read -rs SPOTIFY_CLIENT_SECRET
- *        export SPOTIFY_CLIENT_ID SPOTIFY_CLIENT_SECRET
- *        node scripts/spotify-auth.mjs
+ *  2. Запустить скрипт. Client ID и Client Secret он спросит сам, скрыв
+ *     ввод. Файла с ними заводить НЕ НАДО: `.env` в рабочем каталоге —
+ *     это файл, который однажды уедет в коммит, а репозиторий публичный.
+ *     Переменные окружения тоже годятся, если они уже выставлены, — но
+ *     это не обязательный путь, а запасной.
  *
  * ЗАПРАШИВАЕМЫЕ ПРАВА — ТОЛЬКО ЧТЕНИЕ ТОГО, ЧТО ИГРАЕТ.
  * `user-read-currently-playing` и `user-read-recently-played`. Ни
@@ -44,14 +41,95 @@ import http from 'node:http'
 import crypto from 'node:crypto'
 import { exec } from 'node:child_process'
 
-const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID
-const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET
 const REDIRECT = 'http://127.0.0.1:8888/callback'
 const SCOPES = 'user-read-currently-playing user-read-recently-played'
 
+/** Управляющие символы задаются кодом, а не литералом: в исходнике
+ *  они невидимы, и первый же редактор или копипаста их потеряет. */
+const CTRL_C = String.fromCharCode(3)
+const CTRL_D = String.fromCharCode(4)
+const BACKSPACE = String.fromCharCode(127)
+
+/**
+ * Спросить строку, не показывая ввод.
+ *
+ * ПОЧЕМУ НЕ `readline`. Первая версия брала его, и на втором вопросе
+ * скрипт зависал: закрытый интерфейс уносит stdin с собой, а общий на два
+ * вопроса при вводе трубой съедает обе строки первым же чтением. Поймано
+ * прогоном `printf 'a\nb\n' | node ...` — минута работы вместо зависшего
+ * терминала у того, кто это запустит.
+ *
+ * ОСТАТОК КУСКА ОБЯЗАТЕЛЬНО СОХРАНЯЕТСЯ. Client ID и Secret ВСТАВЛЯЮТ, а
+ * не печатают руками, и вставленные подряд они приходят одним куском.
+ * Выбросив хвост после перевода строки, мы теряли второе значение и ждали
+ * его вечно — ровно это и показал прогон.
+ */
+let pending = ''
+
+function takeLine() {
+  const i = pending.search(/[\r\n]/)
+  if (i < 0) return null
+  const line = pending.slice(0, i)
+  pending = pending.slice(i + 1).replace(/^\n/, '')
+  return line
+}
+
+function askHidden(label) {
+  process.stdout.write(label)
+  const ready = takeLine()
+  if (ready !== null) {
+    process.stdout.write('\n')
+    return Promise.resolve(ready.trim())
+  }
+  return new Promise((resolve) => {
+    const stdin = process.stdin
+    const wasRaw = !!stdin.isRaw
+    // Сырой режим и ЕСТЬ «не показывать ввод»: терминал перестаёт печатать
+    // нажатия сам, а мы за него не печатаем.
+    if (stdin.isTTY) stdin.setRawMode(true)
+    stdin.resume()
+    stdin.setEncoding('utf8')
+    let buf = ''
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      stdin.removeListener('data', onData)
+      if (stdin.isTTY) stdin.setRawMode(wasRaw)
+      stdin.pause()
+      process.stdout.write('\n')
+      resolve(buf.trim())
+    }
+    const onData = (chunk) => {
+      if (done) return
+      for (let k = 0; k < chunk.length; k++) {
+        const ch = chunk[k]
+        // В сыром режиме Ctrl+C сигналом не приходит. Не обработать его —
+        // значит оставить человека без способа прервать ввод.
+        if (ch === CTRL_C) {
+          process.stdout.write('\n')
+          process.exit(130)
+        }
+        if (ch === '\r' || ch === '\n' || ch === CTRL_D) {
+          pending += chunk.slice(k + 1).replace(/^\n/, '')
+          return finish()
+        }
+        if (ch === BACKSPACE || ch === '\b') buf = buf.slice(0, -1)
+        else buf += ch
+      }
+    }
+    stdin.on('data', onData)
+  })
+}
+
+console.log('\nАвторизация Spotify. Ввод не отображается — это нормально.')
+console.log('Значения берутся со страницы приложения в developer.spotify.com/dashboard.\n')
+
+const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || (await askHidden('Client ID:     '))
+const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || (await askHidden('Client Secret: '))
+
 if (!CLIENT_ID || !CLIENT_SECRET) {
-  console.error('\nНет SPOTIFY_CLIENT_ID или SPOTIFY_CLIENT_SECRET в окружении.')
-  console.error('См. комментарий в начале файла.\n')
+  console.error('\nПусто. Прервано.\n')
   process.exit(1)
 }
 
@@ -134,9 +212,11 @@ const server = http.createServer(async (req, res) => {
   console.log(json.refresh_token)
   console.log('\n──────────────────────────────────────────────────────────')
   console.log('\nДальше три команды. Каждая спросит значение и не покажет его:\n')
-  console.log('  bunx wrangler pages secret put SPOTIFY_CLIENT_ID     --project-name=makimum')
-  console.log('  bunx wrangler pages secret put SPOTIFY_CLIENT_SECRET --project-name=makimum')
-  console.log('  bunx wrangler pages secret put SPOTIFY_REFRESH_TOKEN --project-name=makimum')
+  // npx, а не bunx: временная установка wrangler через bunx на этой
+  // машине приезжает без esbuild и падает на сборке функций.
+  console.log('  npx wrangler@4 pages secret put SPOTIFY_CLIENT_ID     --project-name=makimum')
+  console.log('  npx wrangler@4 pages secret put SPOTIFY_CLIENT_SECRET --project-name=makimum')
+  console.log('  npx wrangler@4 pages secret put SPOTIFY_REFRESH_TOKEN --project-name=makimum')
   console.log('\nПосле них — новый деплой, и планшет заиграет ваш Spotify.')
   console.log('Проверить:  curl -s https://makimum.dev/api/now-playing\n')
 })
