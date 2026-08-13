@@ -95,12 +95,13 @@ To wire up your own:
 ```bash
 # 1. developer.spotify.com/dashboard → Create app
 #    Redirect URI exactly: http://127.0.0.1:8888/callback
-node scripts/spotify-auth.mjs      # asks for both, input hidden; prints a refresh token
+# 2. run the helper — it asks for both (input hidden), completes the OAuth
+#    round trip, and writes all three secrets straight into Pages.
+#    The refresh token is never printed: a credential on screen exists to
+#    be copied, and where it lands is decided by a human in a hurry.
+CF_PAGES_PROJECT=<project> node scripts/spotify-auth.mjs
 
-# 2. store all three as Pages secrets (never in the repo)
-npx wrangler@4 pages secret put SPOTIFY_CLIENT_ID     --project-name=<project>
-npx wrangler@4 pages secret put SPOTIFY_CLIENT_SECRET --project-name=<project>
-npx wrangler@4 pages secret put SPOTIFY_REFRESH_TOKEN --project-name=<project>
+# 3. redeploy — Pages secrets are only picked up by a new deployment
 ```
 
 Scopes requested: `user-read-currently-playing` and

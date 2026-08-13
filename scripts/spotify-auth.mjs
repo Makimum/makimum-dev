@@ -39,7 +39,7 @@
 
 import http from 'node:http'
 import crypto from 'node:crypto'
-import { exec } from 'node:child_process'
+import { exec, spawn } from 'node:child_process'
 
 const REDIRECT = 'http://127.0.0.1:8888/callback'
 const SCOPES = 'user-read-currently-playing user-read-recently-played'
@@ -74,7 +74,7 @@ function takeLine() {
   return line
 }
 
-function askHidden(label) {
+function askHidden(label, hidden = true) {
   process.stdout.write(label)
   const ready = takeLine()
   if (ready !== null) {
@@ -86,7 +86,7 @@ function askHidden(label) {
     const wasRaw = !!stdin.isRaw
     // Сырой режим и ЕСТЬ «не показывать ввод»: терминал перестаёт печатать
     // нажатия сам, а мы за него не печатаем.
-    if (stdin.isTTY) stdin.setRawMode(true)
+    if (stdin.isTTY && hidden) stdin.setRawMode(true)
     stdin.resume()
     stdin.setEncoding('utf8')
     let buf = ''
@@ -95,9 +95,9 @@ function askHidden(label) {
       if (done) return
       done = true
       stdin.removeListener('data', onData)
-      if (stdin.isTTY) stdin.setRawMode(wasRaw)
+      if (stdin.isTTY && hidden) stdin.setRawMode(wasRaw)
       stdin.pause()
-      process.stdout.write('\n')
+      if (hidden) process.stdout.write('\n')
       resolve(buf.trim())
     }
     const onData = (chunk) => {
@@ -207,18 +207,66 @@ const server = http.createServer(async (req, res) => {
   done('Готово. Возвращайтесь в терминал.')
   server.close()
 
-  console.log('\n──────────────────────────────────────────────────────────')
-  console.log('REFRESH-ТОКЕН (никому не показывать, в чат не вставлять):\n')
-  console.log(json.refresh_token)
-  console.log('\n──────────────────────────────────────────────────────────')
-  console.log('\nДальше три команды. Каждая спросит значение и не покажет его:\n')
-  // npx, а не bunx: временная установка wrangler через bunx на этой
-  // машине приезжает без esbuild и падает на сборке функций.
-  console.log('  npx wrangler@4 pages secret put SPOTIFY_CLIENT_ID     --project-name=makimum')
-  console.log('  npx wrangler@4 pages secret put SPOTIFY_CLIENT_SECRET --project-name=makimum')
-  console.log('  npx wrangler@4 pages secret put SPOTIFY_REFRESH_TOKEN --project-name=makimum')
-  console.log('\nПосле них — новый деплой, и планшет заиграет ваш Spotify.')
+  /**
+   * ТОКЕН НА ЭКРАН БОЛЬШЕ НЕ ПЕЧАТАЕТСЯ.
+   *
+   * Первая версия печатала его и просила «никому не показывать». Это не
+   * сработало — и не могло: строка на экране существует, чтобы её
+   * скопировали, а куда именно, решает уже человек в спешке. У Максима
+   * она уехала в переписку через полминуты после появления.
+   *
+   * Правильное решение — не показывать вовсе, а отдать напрямую тому,
+   * кому она нужна. `wrangler pages secret put` читает значение со
+   * стандартного ввода, так что токен идёт из памяти процесса в секреты
+   * Cloudflare и нигде по дороге не появляется.
+   *
+   * Ручной путь остаётся на случай другого хостинга, но он теперь
+   * ЯВНЫЙ выбор, а не то, что происходит само.
+   */
+  const project = process.env.CF_PAGES_PROJECT || 'makimum'
+  console.log('\nТокен получен. На экран он не выводится — так безопаснее.\n')
+  const answer = (await askHidden(`Положить все три секрета в проект «${project}» сейчас? [Y/n] `, false))
+    .toLowerCase()
+
+  if (answer === 'n' || answer === 'no') {
+    console.log('\nХорошо. Тогда вывожу токен — он нужен вам сейчас, и это')
+    console.log('осознанный выбор. Скопируйте и СРАЗУ очистите терминал (Cmd+K).')
+    console.log('Никуда, кроме секретов хостинга, эту строку вставлять нельзя.\n')
+    console.log(json.refresh_token)
+    console.log('')
+    process.exit(0)
+  }
+
+  const put = (name, value) =>
+    new Promise((resolve) => {
+      const child = spawn(
+        'npx',
+        ['--yes', 'wrangler@4', 'pages', 'secret', 'put', name, '--project-name=' + project],
+        { stdio: ['pipe', 'inherit', 'inherit'] },
+      )
+      child.stdin.write(value + '\n')
+      child.stdin.end()
+      child.on('close', (code) => resolve(code === 0))
+    })
+
+  console.log('\nКладу секреты. Значения не печатаются.\n')
+  const ok =
+    (await put('SPOTIFY_CLIENT_ID', CLIENT_ID)) &&
+    (await put('SPOTIFY_CLIENT_SECRET', CLIENT_SECRET)) &&
+    (await put('SPOTIFY_REFRESH_TOKEN', json.refresh_token))
+
+  if (!ok) {
+    console.error('\nЧто-то не легло. Посмотрите вывод wrangler выше.\n')
+    process.exit(1)
+  }
+
+  console.log('\nВсе три на месте. Осталось выкатить — секреты Pages')
+  console.log('подхватываются только НОВЫМ деплоем:\n')
+  console.log('  bun x vite build')
+  console.log('  npx wrangler@4 pages deploy dist --project-name=' + project +
+    ' --branch=main --commit-dirty=true\n')
   console.log('Проверить:  curl -s https://makimum.dev/api/now-playing\n')
+  process.exit(0)
 })
 
 server.listen(8888, '127.0.0.1', () => {
