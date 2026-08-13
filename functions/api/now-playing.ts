@@ -78,11 +78,29 @@ interface SpotifyTrack {
   duration_ms: number
   artists: SpotifyArtist[]
   album?: { name: string }
+  external_urls?: { spotify?: string }
 }
 
-/** Наружу уходит ровно это и ничего больше. Ни идентификаторов, ни
- *  ссылок, ни того, из какого плейлиста играет: на экране планшета этого
- *  нет, значит и в ответе быть не должно. */
+/**
+ * Наружу уходит ровно то, что рисуется на экране планшета.
+ *
+ * `url` добавлен вместе с интерактивностью: по нажатию на обложку планшет
+ * открывает трек в Spotify, и без адреса эту кнопку пришлось бы либо
+ * убрать, либо оставить не работающей. Это ПУБЛИЧНАЯ ссылка вида
+ * open.spotify.com/track/… — та же, которой делятся в чате; ни
+ * идентификатора аккаунта, ни плейлиста в ней нет.
+ *
+ * Управления плеером здесь нет и не будет: права запрошены только на
+ * чтение, и кнопка, которая делает вид, что переключает трек, врала бы.
+ */
+interface Song {
+  title: string
+  artist: string
+  album: string
+  durationSec: number
+  url: string
+}
+
 interface Payload {
   playing: boolean
   title: string
@@ -90,27 +108,65 @@ interface Payload {
   album: string
   durationSec: number
   progressSec: number
+  url: string
+  /** Что играло до этого. Планшет показывает это списком. */
+  recent: Song[]
 }
 
-function shape(track: SpotifyTrack, progressMs: number, playing: boolean): Payload {
+function song(track: SpotifyTrack): Song {
   return {
-    playing,
     title: track.name,
     artist: track.artists.map((a) => a.name).join(', '),
     album: track.album?.name ?? '',
     durationSec: Math.round(track.duration_ms / 1000),
-    progressSec: Math.round(progressMs / 1000),
+    url: track.external_urls?.spotify ?? '',
   }
+}
+
+function shape(
+  track: SpotifyTrack,
+  progressMs: number,
+  playing: boolean,
+  recent: Song[],
+): Payload {
+  return { ...song(track), playing, progressSec: Math.round(progressMs / 1000), recent }
+}
+
+/** Последние прослушанные. Один запрос на всё, потому что кеш общий и
+ *  ходить дважды за тем же незачем. */
+async function recentSongs(auth: Record<string, string>, limit: number): Promise<Song[]> {
+  const res = await fetch(`https://api.spotify.com/v1/me/player/recently-played?limit=${limit}`, {
+    headers: auth,
+  })
+  if (!res.ok) return []
+  const r = (await res.json()) as { items?: { track: SpotifyTrack }[] }
+  const out: Song[] = []
+  const seen = new Set<string>()
+  for (const it of r.items ?? []) {
+    const s = song(it.track)
+    // Один и тот же трек подряд в истории — обычное дело (переслушал,
+    // перемотал). В списке это выглядит сбоем, поэтому схлопываем.
+    const key = `${s.title}|${s.artist}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(s)
+  }
+  return out
 }
 
 async function readSpotify(env: Env): Promise<Payload | null> {
   const token = await accessToken(env)
   const auth = { Authorization: `Bearer ${token}` }
 
-  const live = await fetch(
-    'https://api.spotify.com/v1/me/player/currently-playing?additional_types=track',
-    { headers: auth },
-  )
+  // Оба запроса разом: они независимы, а последовательно это лишние
+  // полсекунды на каждом промахе кеша.
+  const [live, recent] = await Promise.all([
+    fetch('https://api.spotify.com/v1/me/player/currently-playing?additional_types=track', {
+      headers: auth,
+    }),
+    recentSongs(auth, 12),
+  ])
+
   // 204 — «плеер молчит». Это штатный ответ, а не сбой.
   if (live.ok && live.status !== 204) {
     const j = (await live.json()) as {
@@ -120,20 +176,24 @@ async function readSpotify(env: Env): Promise<Payload | null> {
       currently_playing_type?: string
     }
     if (j.item && j.currently_playing_type === 'track') {
-      return shape(j.item, j.progress_ms ?? 0, !!j.is_playing)
+      const now = shape(j.item, j.progress_ms ?? 0, !!j.is_playing, recent)
+      // Играющий трек в списке «до этого» — повтор самого себя.
+      now.recent = recent.filter((r) => `${r.title}|${r.artist}` !== `${now.title}|${now.artist}`)
+      return now
     }
   }
 
   // Ничего не играет — показываем последнее прослушанное, поставленное на
   // паузу в самом начале. Пустой экран читался бы как поломка, а «плеер
   // на паузе» — это правда о том, что происходит.
-  const recent = await fetch('https://api.spotify.com/v1/me/player/recently-played?limit=1', {
-    headers: auth,
-  })
-  if (!recent.ok) return null
-  const r = (await recent.json()) as { items?: { track: SpotifyTrack }[] }
-  const first = r.items?.[0]?.track
-  return first ? shape(first, 0, false) : null
+  const first = recent[0]
+  if (!first) return null
+  return {
+    ...first,
+    playing: false,
+    progressSec: 0,
+    recent: recent.slice(1),
+  }
 }
 
 export const onRequestGet = async (ctx: PagesContext): Promise<Response> => {

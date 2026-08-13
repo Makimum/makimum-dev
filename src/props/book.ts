@@ -207,13 +207,44 @@ export function buildBook(): THREE.Group {
   )
   g.add(pages)
 
-  // Крышки: нижняя и верхняя, обе больше блока на кант.
-  for (const [y, name] of [
-    [board / 2, 'book-board-lower'],
-    [board * 1.5 + block, 'book-board-upper'],
-  ] as const) {
-    g.add(part(box(w, board, h, BEVEL.sm * 0.5), clothMat, [0, y, 0], name))
-  }
+  // Нижняя крышка — неподвижна.
+  g.add(part(box(w, board, h, BEVEL.sm * 0.5), clothMat, [0, board / 2, 0], 'book-board-lower'))
+
+  /**
+   * Верхняя крышка живёт в группе с осью НА КОРЕШКЕ, потому что книгу
+   * открывают именно так: крышка поднимается и ложится слева, а не
+   * уезжает целиком.
+   *
+   * Ось — Z: она идёт вдоль высоты книги, то есть вдоль корешка. Поворот
+   * на +π проводит крышку через верх и кладёт её с другой стороны;
+   * поворот вокруг X или Y увёл бы её в стол.
+   */
+  const cover = new THREE.Group()
+  cover.name = 'book-cover'
+  cover.position.set(-w / 2, board * 1.5 + block, 0)
+  cover.add(part(box(w, board, h, BEVEL.sm * 0.5), clothMat, [w / 2, 0, 0], 'book-board-upper'))
+  g.add(cover)
+
+  /**
+   * Раскрытый разворот. Плоскость шириной в две страницы, лежащая на
+   * корешке: левая половина ложится на откинутую крышку, правая — на
+   * блок. Скрыта, пока книга закрыта.
+   *
+   * Высота посадки считается от ВЕРХА откинутой крышки, а не от блока:
+   * крышка, перевернувшись, оказывается на той же высоте слева, и лист,
+   * положенный по блоку, спорил бы с ней z-буфером.
+   */
+  const spreadW = (w - square) * 2
+  const spread = new THREE.Mesh(
+    new THREE.PlaneGeometry(spreadW, h - square * 2),
+    new THREE.MeshStandardMaterial({ color: PALETTE.bookPages, roughness: 0.92, metalness: 0 }),
+  )
+  spread.name = 'screen'
+  spread.rotation.x = -Math.PI / 2
+  spread.position.set(-w / 2, board * 2 + block + 0.0004, 0)
+  spread.visible = false
+  spread.receiveShadow = true
+  g.add(spread)
 
   // Корешок. Хорда — расстояние между наружными кромками крышек,
   // то есть вся толщина книги; стрелка задана в constants.

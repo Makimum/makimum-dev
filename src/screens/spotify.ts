@@ -1,4 +1,4 @@
-import { NOW_PLAYING, type Track } from './nowPlaying'
+import { NOW_PLAYING, type Song, type Track } from './nowPlaying'
 
 /**
  * Живой Spotify на планшете.
@@ -26,13 +26,10 @@ const ENDPOINT = '/api/now-playing'
  *  незачем, и на стороне сервера всё равно стоит кеш на 15 секунд. */
 const POLL_MS = 30_000
 
-interface Payload {
+interface Payload extends Song {
   playing: boolean
-  title: string
-  artist: string
-  album: string
-  durationSec: number
   progressSec: number
+  recent: Song[]
 }
 
 export interface LiveState {
@@ -42,6 +39,9 @@ export interface LiveState {
   /** Когда ответ пришёл, по `performance.now()`. */
   at: number
   playing: boolean
+  url: string
+  /** Что играло до этого — планшет показывает списком. */
+  recent: Song[]
 }
 
 let live: LiveState | null = null
@@ -71,7 +71,14 @@ async function poll() {
     if (!p?.title) return
     const wasKey = live && `${live.track.title}|${live.track.artist}`
     const key = `${p.title}|${p.artist}`
-    live = { track: toTrack(p), progressSec: p.progressSec, at: performance.now(), playing: p.playing }
+    live = {
+      track: toTrack(p),
+      progressSec: p.progressSec,
+      at: performance.now(),
+      playing: p.playing,
+      url: p.url,
+      recent: Array.isArray(p.recent) ? p.recent : [],
+    }
     if (wasKey !== key) changed = true
   } catch {
     // Сети нет или ответ битый — молча живём дальше на прежнем состоянии.
@@ -116,4 +123,22 @@ export function trackChanged(): boolean {
 /** Играет ли что-то. Планшет рисует паузу вместо кнопки остановки. */
 export function isPlaying(): boolean {
   return live ? live.playing : true
+}
+
+/** Что играло до этого. Пусто, пока Spotify не подключён — планшет тогда
+ *  и не предлагает открыть список. */
+export function recentTracks(): Song[] {
+  return live?.recent ?? []
+}
+
+/** Ссылка на текущий трек, если она есть. */
+export function trackUrl(): string {
+  return live?.url ?? ''
+}
+
+/** Подключён ли настоящий Spotify. От этого зависит, что предлагать в
+ *  фокусе: у встроенного трека ни списка, ни ссылки нет, и обещать их
+ *  подписью было бы враньём. */
+export function isLive(): boolean {
+  return live !== null
 }

@@ -1,4 +1,4 @@
-import { DESK, MONITOR } from '../constants'
+import { BOOK, DESK, MONITOR, TABLET, WORKSTATION } from '../constants'
 
 /**
  * Реестр интерактивных объектов — единственный источник правды о том,
@@ -70,6 +70,96 @@ export const OVERVIEW: CameraPose = {
  *  чтобы поза не разъехалась при правке габаритов стола. */
 const SCREEN_Y = DESK.height + MONITOR.neckH + MONITOR.screenH / 2
 
+/**
+ * Поза для маленького предмета на столе.
+ *
+ * У монитора и ноутбука позы сняты руками через `dumpCamera()` — и это
+ * правильно: там кадр композиционный, и вычисленный подлёт выглядел бы
+ * вычисленным. У планшета и книги задача другая и куда более узкая:
+ * поставить камеру перед плоскостью, чтобы на ней можно было ЧИТАТЬ.
+ * Тут «на глаз» — это лишний источник ошибки, а не авторский жест:
+ * предметы мелкие, и промах в пять сантиметров уводит их из кадра.
+ *
+ * Считается от локальных координат рабочего места. Разворот на π/2 у
+ * `WORKSTATION` переводит локальный +X в мировой −Z, а локальный +Z — в
+ * мировой +X; отсюда две строки ниже.
+ */
+function deskPose(
+  local: { x: number; y: number; z: number },
+  normal: { x: number; y: number; z: number },
+  distance: number,
+  fov: number,
+): CameraPose {
+  const world = {
+    x: WORKSTATION.posX + local.z,
+    y: local.y,
+    z: WORKSTATION.posZ - local.x,
+  }
+  const n = { x: normal.z, y: normal.y, z: -normal.x }
+  return {
+    position: [world.x + n.x * distance, world.y + n.y * distance, world.z + n.z * distance],
+    target: [world.x, world.y, world.z],
+    fov,
+  }
+}
+
+/** Планшет: экран откинут назад на TABLET.tilt, значит и нормаль у него
+ *  наклонена ровно на столько же. */
+const TABLET_LOCAL_X = -0.4
+const TABLET_LOCAL_Z = 0.1
+const tabletCos = Math.cos(TABLET.tilt)
+const tabletSin = Math.sin(TABLET.tilt)
+const TABLET_POSE = deskPose(
+  {
+    x: TABLET_LOCAL_X,
+    y: DESK.height + 0.003 + (TABLET.h / 2) * tabletCos + (TABLET.thickness / 2) * tabletSin,
+    z: TABLET_LOCAL_Z - (TABLET.h / 2) * tabletSin + (TABLET.thickness / 2) * tabletCos,
+  },
+  { x: 0, y: tabletSin, z: tabletCos },
+  0.55,
+  30,
+)
+
+/**
+ * Книга лежит плашмя, поэтому смотрим сверху и чуть под углом: строго
+ * сверху разворот читается как скан, а не как книга на столе.
+ *
+ * ДВЕ ВЕЩИ, БЕЗ КОТОРЫХ КАДР КОСОЙ, и обе видны только на живой сцене.
+ *
+ * Первая: целиться надо в центр РАЗВОРОТА, а не в начало координат книги.
+ * Разворот раскрывается влево от корешка, то есть его середина — это сам
+ * корешок, смещённый от центра книги на полширины.
+ *
+ * Вторая: книгу кладут с разворотом на 0.31 радиана — её КЛАДУТ, а не
+ * ставят по линейке. Наклон камеры поэтому берётся не в мировых осях, а
+ * вдоль страницы: горизонталь кадра обязана совпасть с направлением
+ * строки. С мировым наклоном текст выходил повёрнутым на те же 18°,
+ * и это было первое, что бросилось в глаза на скриншоте.
+ */
+const BOOK_LOCAL_X = -0.05
+const BOOK_LOCAL_Z = 0.22
+const BOOK_YAW = 0.31
+/** Середина разворота = корешок: полширины книги в её собственном −X. */
+const BOOK_SPREAD_X = BOOK_LOCAL_X - (BOOK.w / 2) * Math.cos(BOOK_YAW)
+const BOOK_SPREAD_Z = BOOK_LOCAL_Z + (BOOK.w / 2) * Math.sin(BOOK_YAW)
+/** Наклон от вертикали. Синус уходит вдоль страницы (локальный +Z книги),
+ *  а не в мировую ось. */
+const BOOK_LEAN = 0.34
+const BOOK_POSE = deskPose(
+  {
+    x: BOOK_SPREAD_X,
+    y: DESK.height + BOOK.board * 2 + BOOK.block,
+    z: BOOK_SPREAD_Z,
+  },
+  {
+    x: Math.sin(BOOK_YAW) * BOOK_LEAN,
+    y: Math.sqrt(1 - BOOK_LEAN * BOOK_LEAN),
+    z: Math.cos(BOOK_YAW) * BOOK_LEAN,
+  },
+  0.42,
+  34,
+)
+
 export const HOTSPOTS: Hotspot[] = [
   {
     id: 'monitor',
@@ -94,6 +184,18 @@ export const HOTSPOTS: Hotspot[] = [
       target: [0.577, 0.85, 0.744],
       fov: 28,
     },
+  },
+  {
+    id: 'tablet',
+    meshName: 'tablet',
+    label: 'what is playing',
+    pose: TABLET_POSE,
+  },
+  {
+    id: 'book',
+    meshName: 'book',
+    label: 'read the book',
+    pose: BOOK_POSE,
   },
   {
     id: 'chair',

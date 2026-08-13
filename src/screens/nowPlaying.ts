@@ -1,4 +1,5 @@
 import { UI, font, roundRect, tracked, trackedWidth } from './theme'
+import type { HitRegion } from './paint'
 
 /**
  * Экран планшета: музыка, которая сейчас играет.
@@ -19,6 +20,15 @@ import { UI, font, roundRect, tracked, trackedWidth } from './theme'
  * воспроизводится. Узнаваемость даёт раскладка, а не значок, а чужая
  * марка на витрине собственного портфолио — лишний разговор.
  */
+
+/** Строка списка. Тот же набор полей, что отдаёт функция Pages. */
+export interface Song {
+  title: string
+  artist: string
+  album: string
+  durationSec: number
+  url: string
+}
 
 export interface Track {
   title: string
@@ -309,8 +319,13 @@ export function paintNowPlaying(
   elapsed: number,
   clock: string,
   playing = true,
-): { band: ProgressBand; background: CanvasGradient } {
+  interactive = false,
+): { band: ProgressBand; background: CanvasGradient; hits: HitRegion[] } {
   const pad = W * 0.085
+  // Области попадания собираются ТУТ ЖЕ, где рисуется. Это то же правило,
+  // что у монитора: прямоугольник для клика приходит из кода, который
+  // нарисовал пиксели, и разъехаться с ними не может.
+  const hits: HitRegion[] = []
 
   // Фон приложения тянется от тона обложки к почти чёрному — так же,
   // как в самом приложении: экран продолжает картинку, а не лежит под ней.
@@ -418,6 +433,16 @@ export function paintNowPlaying(
   const band: ProgressBand = { y: titleY + H * 0.05, h: H * 0.075 }
   paintProgress(ctx, W, band, bg, track, elapsed, playing)
 
+  // Обложка вместе с названием — одна большая кнопка «открыть в Spotify».
+  // Она же самое очевидное место, куда ткнут, и вести оно должно туда,
+  // куда ткнувший и хотел.
+  if (interactive) {
+    hits.push({ id: 'open', x: pad, y: coverY, w: cover, h: cover + H * 0.075 })
+    // Шапка «PLAYING FROM» открывает список того, что играло раньше:
+    // в приложении по этой же строке и уходят к источнику.
+    hits.push({ id: 'queue', x: pad, y: headY - H * 0.02, w: W - pad * 2, h: H * 0.06 })
+  }
+
   // --- транспорт ---
   // Отступ 0.032, а не 0.045: при прежнем кнопка воспроизведения уходила
   // нижней кромкой на 1185-й пиксель холста высотой 1180, то есть
@@ -437,7 +462,113 @@ export function paintNowPlaying(
   icon(ctx, 'next', W * 0.7, tY, r * 0.85, UI.text)
   icon(ctx, 'repeat', W - pad - r * 0.6, tY, r * 0.7, UI.dim)
 
-  return { band, background: bg }
+  return { band, background: bg, hits }
+}
+
+/**
+ * Список того, что играло раньше.
+ *
+ * Управления плеером здесь нет и быть не может: права запрошены только на
+ * чтение. Поэтому нажатие на строку делает единственное честное — открывает
+ * трек в Spotify. Кнопка, которая делает вид, что переключает музыку,
+ * врала бы про то, что умеет.
+ */
+export function paintQueue(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  songs: Song[],
+  clock: string,
+  scroll: number,
+  hover: string | null,
+): { hits: HitRegion[]; maxScroll: number } {
+  const pad = W * 0.085
+  const hits: HitRegion[] = []
+
+  const bg = ctx.createLinearGradient(0, 0, 0, H)
+  bg.addColorStop(0, '#12141a')
+  bg.addColorStop(1, UI.ink0)
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, W, H)
+
+  // Строка состояния — та же, что на главном экране: часы комнаты.
+  ctx.textBaseline = 'middle'
+  ctx.textAlign = 'left'
+  ctx.font = font(600, W * 0.028, UI.sans)
+  ctx.fillStyle = UI.text
+  ctx.fillText(clock, pad * 0.7, H * 0.028)
+
+  // Шеврон «назад» — та же кнопка, что и на главном, только теперь она
+  // действительно возвращает.
+  ctx.strokeStyle = UI.text
+  ctx.lineWidth = Math.max(2, W * 0.006)
+  ctx.lineCap = 'round'
+  const backY = H * 0.075
+  ctx.beginPath()
+  ctx.moveTo(pad * 0.9 + W * 0.03, backY - W * 0.026)
+  ctx.lineTo(pad * 0.9, backY)
+  ctx.lineTo(pad * 0.9 + W * 0.03, backY + W * 0.026)
+  ctx.stroke()
+  hits.push({ id: 'back', x: 0, y: backY - H * 0.03, w: W * 0.28, h: H * 0.06 })
+
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'alphabetic'
+  ctx.font = font(700, W * 0.023, UI.sans)
+  ctx.fillStyle = UI.faint
+  tracked(ctx, 'RECENTLY PLAYED', pad, H * 0.125, W * 0.006)
+
+  const top = H * 0.16
+  const rowH = H * 0.082
+  const listH = H - top - H * 0.03
+  const maxScroll = Math.max(0, songs.length * rowH - listH)
+  const at = Math.min(Math.max(0, scroll), maxScroll)
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(0, top, W, listH)
+  ctx.clip()
+
+  songs.forEach((song, i) => {
+    const y = top + i * rowH - at
+    if (y + rowH < top || y > top + listH) return
+    const id = `song:${i}`
+    if (hover === id) {
+      ctx.fillStyle = 'rgba(255,255,255,0.06)'
+      roundRect(ctx, pad * 0.5, y + rowH * 0.06, W - pad, rowH * 0.88, W * 0.014)
+      ctx.fill()
+    }
+    // Крошечная обложка тем же процедурным мотивом: строка списка без
+    // картинки читается как таблица, а не как музыка.
+    const art = rowH * 0.66
+    paintCover(ctx, pad, y + (rowH - art) / 2, art, song.title)
+
+    const tx = pad + art + W * 0.035
+    const maxW = W - tx - pad
+    fitText(ctx, song.title, tx, y + rowH * 0.44, maxW, W * 0.032, 600, UI.text)
+    fitText(ctx, song.artist, tx, y + rowH * 0.71, maxW, W * 0.026, 400, UI.dim)
+    hits.push({ id, x: 0, y, w: W, h: rowH })
+  })
+  ctx.restore()
+
+  if (!songs.length) {
+    ctx.textAlign = 'center'
+    ctx.font = font(500, W * 0.03, UI.sans)
+    ctx.fillStyle = UI.faint
+    ctx.fillText('nothing here yet', W / 2, H * 0.4)
+    ctx.textAlign = 'left'
+  }
+
+  // Тень у нижней кромки, пока список не докручен: без неё непонятно,
+  // что он продолжается.
+  if (at < maxScroll - 1) {
+    const fade = ctx.createLinearGradient(0, H - H * 0.09, 0, H)
+    fade.addColorStop(0, 'rgba(11,14,19,0)')
+    fade.addColorStop(1, UI.ink0)
+    ctx.fillStyle = fade
+    ctx.fillRect(0, H - H * 0.09, W, H * 0.09)
+  }
+
+  return { hits, maxScroll }
 }
 
 /**

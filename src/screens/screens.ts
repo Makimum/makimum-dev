@@ -11,8 +11,18 @@ import {
 } from './paint'
 import { createTetris, type GameKey, type Phase, type Tetris } from './tetris'
 import { Panel } from './panel'
-import { paintNowPlaying, paintProgress, type ProgressBand } from './nowPlaying'
-import { currentElapsed, currentTrack, isPlaying, trackChanged } from './spotify'
+import { paintNowPlaying, paintProgress, paintQueue, type ProgressBand } from './nowPlaying'
+import { paginate, paintSpread, type Spread } from './bookPages'
+import { BOOK } from '../constants'
+import {
+  currentElapsed,
+  currentTrack,
+  isLive,
+  isPlaying,
+  recentTracks,
+  trackChanged,
+  trackUrl,
+} from './spotify'
 
 /**
  * Экраны комнаты как маленькая операционная система.
@@ -48,6 +58,44 @@ export interface SurfaceOptions {
 
 /** Что клик сделал с экраном — это решает, что делать камере. */
 export type ClickResult = 'none' | 'consumed' | 'exit'
+
+/**
+ * Поверхность, с которой можно работать в фокусе.
+ *
+ * Появился, когда интерактивными стали не только монитор с ноутбуком, но
+ * и планшет с книгой. `focus.ts` раньше знал конкретный класс `Surface` —
+ * и это было ровно то место, где «добавить ещё один кликабельный предмет»
+ * означало «править механику ввода». Теперь ввод знает интерфейс, а
+ * каждый предмет отвечает за себя.
+ *
+ * `hint()` тоже здесь не случайно: подсказку внизу экрана раньше собирал
+ * `focus.ts`, разбирая чужое состояние (`view`, `appId`) цепочкой
+ * условий. Знать, что написать про СЕБЯ, — работа предмета; иначе каждый
+ * новый экран дописывает ветку в чужой файл.
+ */
+export interface Interactive {
+  hover(uv: THREE.Vector2 | null): boolean
+  click(uv: THREE.Vector2): ClickResult
+  /** Шаг назад по Esc. `exit` означает «дальше отступать некуда, выходим
+   *  из фокуса» — камера это и делает. */
+  back(): ClickResult
+  /** Стрелки влево-вправо. true — предмет их взял, браузеру не отдавать. */
+  arrow(dir: 1 | -1): boolean
+  scrollBy(dy: number): boolean
+  key(k: GameKey, down: boolean): boolean
+  /** Строка подсказки под кадром, пока предмет в фокусе. */
+  hint(): string
+  /** Вернуться в состояние, в котором предмет показывают издалека. */
+  reset(): void
+  /**
+   * Камера вошла в фокус или вышла из него.
+   *
+   * Нужно предметам, у которых фокус меняет не только картинку на
+   * поверхности, но и саму вещь: книга при подлёте ОТКРЫВАЕТСЯ. Метод
+   * необязательный — экранам, которые просто меняют вид, он ни к чему.
+   */
+  focusChanged?(active: boolean): void
+}
 
 export class Surface {
   readonly mesh: THREE.Mesh
@@ -96,6 +144,16 @@ export class Surface {
 
   get view() {
     return this.state.view
+  }
+
+  /** Что писать под кадром. Логика жила в `focus.ts` и разбирала чужое
+   *  состояние; теперь экран отвечает за себя сам. */
+  hint(): string {
+    if (this.state.view !== 'app') return 'click an app · esc to leave'
+    if (this.state.appId === 'tetris') {
+      return '← → move · ↓ soft drop · ↑ rotate · space hard drop · esc to go back'
+    }
+    return 'scroll to read · ← → to move · esc to go back'
   }
 
   /** Что открыто: подсказке в углу нужны разные слова для документа и
@@ -386,7 +444,7 @@ export class Surface {
  * 820 × 1180 ради бегущей головки — та же ошибка, которой избежал
  * тетрис, перерисовывая стакан вместо всего окна.
  */
-export class NowPlaying {
+export class NowPlaying implements Interactive {
   readonly mesh: THREE.Mesh
   private readonly panel: Panel
   private band: ProgressBand | null = null
@@ -395,14 +453,26 @@ export class NowPlaying {
   private lastSecond = -1
   private clock = ''
 
+  /**
+   * Что открыто. `now` — то, что играет; `queue` — список того, что играло
+   * раньше. Второго вида не было, пока планшет был декорацией; он появился
+   * вместе с фокусом, потому что подлетевшая камера обязана давать больше,
+   * чем взгляд издалека, — иначе подлетать незачем.
+   */
+  private view: 'now' | 'queue' = 'now'
+  private scroll = 0
+  private maxScroll = 0
+  private hits: HitRegion[] = []
+  private hovered: string | null = null
+
   constructor(mesh: THREE.Mesh, material: THREE.MeshStandardMaterial) {
     this.mesh = mesh
     this.panel = new Panel({
       material,
       // 820 × 1180 — ровно половина настоящей матрицы iPad Air (1640 ×
-      // 2360). Полного разрешения здесь не нужно: у планшета нет
-      // хотспота, ближе минимального расстояния орбиты (0.6 м) камера
-      // не подойдёт, а там экран занимает около трети высоты кадра.
+      // 2360). Полного разрешения не нужно: у планшета минимальное
+      // расстояние орбиты 0.6 м, а в фокусе камера подходит к нему на
+      // 0.34 м, и там экран занимает около двух третей высоты кадра.
       width: 820,
       height: 1180,
       // Планшет светит слабее монитора: он меньше и стоит дальше от
@@ -419,45 +489,334 @@ export class NowPlaying {
     this.full = true
   }
 
-  flush(nowMs: number) {
-    const track = currentTrack()
-    const elapsed = currentElapsed(nowMs)
-    const playing = isPlaying()
-    const second = Math.floor(elapsed)
-    // Приехал другой трек — меняются обложка, название и длительность,
-    // то есть весь экран, а не полоса.
-    if (trackChanged()) this.full = true
+  /* ---------------- Interactive ---------------- */
 
-    if (this.full) {
-      this.full = false
-      this.lastSecond = second
-      const r = paintNowPlaying(
-        this.panel.ctx,
-        this.panel.width,
-        this.panel.height,
-        track,
-        elapsed,
-        this.clock,
-        playing,
-      )
-      this.band = r.band
-      this.background = r.background
+  hint(): string {
+    if (this.view === 'queue') return 'scroll the list · click to open in Spotify · esc to go back'
+    if (!isLive()) return 'esc to go back'
+    return 'click the cover to open in Spotify · click the header for history · esc to leave'
+  }
+
+  private regionAt(uv: THREE.Vector2): HitRegion | null {
+    this.flushNow()
+    const p = this.panel.toCanvas(uv)
+    for (let i = this.hits.length - 1; i >= 0; i--) {
+      const r = this.hits[i]
+      if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) return r
+    }
+    return null
+  }
+
+  hover(uv: THREE.Vector2 | null): boolean {
+    const id = uv ? (this.regionAt(uv)?.id ?? null) : null
+    if (id !== this.hovered) {
+      this.hovered = id
+      // Подсветка строки видна только в списке; на главном экране
+      // перерисовывать весь холст ради наведения незачем.
+      if (this.view === 'queue') this.full = true
+    }
+    return id !== null
+  }
+
+  click(uv: THREE.Vector2): ClickResult {
+    const hit = this.regionAt(uv)
+    if (!hit) return 'none'
+    const [kind, value] = hit.id.split(':')
+
+    if (kind === 'queue') {
+      // Список открывается только когда он есть. У встроенного трека
+      // истории нет, и пустой экран был бы обещанием, которого не сдержали.
+      if (!isLive() || !recentTracks().length) return 'none'
+      this.view = 'queue'
+      this.scroll = 0
+      this.hovered = null
+      this.full = true
+      return 'consumed'
+    }
+    if (kind === 'back') return this.back()
+    if (kind === 'open' || kind === 'song') {
+      const url = kind === 'open' ? trackUrl() : (recentTracks()[Number(value)]?.url ?? '')
+      if (!url) return 'none'
+      // Наружу — только новая вкладка и только по явному нажатию: это то
+      // же правило, что у ссылок в документах на мониторе.
+      window.open(url, '_blank', 'noopener,noreferrer')
+      return 'consumed'
+    }
+    return 'none'
+  }
+
+  back(): ClickResult {
+    if (this.view === 'queue') {
+      this.view = 'now'
+      this.hovered = null
+      this.full = true
+      return 'consumed'
+    }
+    return 'exit'
+  }
+
+  arrow(dir: 1 | -1): boolean {
+    if (this.view !== 'queue') return false
+    return this.scrollBy(dir * 120)
+  }
+
+  scrollBy(dy: number): boolean {
+    if (this.view !== 'queue') return false
+    const next = Math.min(Math.max(0, this.scroll + dy), this.maxScroll)
+    if (next === this.scroll) return false
+    this.scroll = next
+    this.full = true
+    return true
+  }
+
+  key(): boolean {
+    return false
+  }
+
+  reset() {
+    if (this.view === 'now' && !this.hovered) return
+    this.view = 'now'
+    this.scroll = 0
+    this.hovered = null
+    this.full = true
+  }
+
+  /* ---------------- отрисовка ---------------- */
+
+  /** Досрочная перерисовка перед попаданием: области приходят от
+   *  рисователя, и пока он не отработал, они описывают прошлый кадр. */
+  private flushNow() {
+    if (this.full) this.paint(performance.now())
+  }
+
+  private paint(nowMs: number) {
+    const ctx = this.panel.ctx
+    const W = this.panel.width
+    const H = this.panel.height
+    this.full = false
+
+    if (this.view === 'queue') {
+      const r = paintQueue(ctx, W, H, recentTracks(), this.clock, this.scroll, this.hovered)
+      this.hits = r.hits
+      this.maxScroll = r.maxScroll
+      this.band = null
       this.panel.uploaded()
       return
     }
 
-    if (second === this.lastSecond || !this.band) return
+    const elapsed = currentElapsed(nowMs)
+    this.lastSecond = Math.floor(elapsed)
+    const r = paintNowPlaying(
+      ctx,
+      W,
+      H,
+      currentTrack(),
+      elapsed,
+      this.clock,
+      isPlaying(),
+      // Кнопки предлагаются, только если за ними что-то есть: у
+      // встроенного трека нет ни ссылки, ни истории.
+      isLive(),
+    )
+    this.band = r.band
+    this.background = r.background
+    this.hits = r.hits
+    this.panel.uploaded()
+  }
+
+  flush(nowMs: number) {
+    // Приехал другой трек — меняются обложка, название и длительность,
+    // то есть весь экран, а не полоса.
+    if (trackChanged()) this.full = true
+    if (this.full) {
+      this.paint(nowMs)
+      return
+    }
+    // В списке нечему тикать: там нет ни дорожки, ни таймера.
+    if (this.view === 'queue' || !this.band) return
+
+    const elapsed = currentElapsed(nowMs)
+    const second = Math.floor(elapsed)
+    if (second === this.lastSecond) return
     this.lastSecond = second
     paintProgress(
       this.panel.ctx,
       this.panel.width,
       this.band,
       this.background,
-      track,
+      currentTrack(),
       elapsed,
-      playing,
+      isPlaying(),
     )
     this.panel.uploaded()
+  }
+}
+
+/**
+ * Книга, которую можно открыть и читать.
+ *
+ * ЧТО ЗДЕСЬ ПРОИСХОДИТ ФИЗИЧЕСКИ. При входе в фокус крышка поворачивается
+ * на π вокруг корешка и ложится слева, а между ней и блоком проявляется
+ * разворот. При выходе — обратно. Это не декорация: закрытая книга,
+ * которую «читают», не читалась бы вовсе, а мгновенно возникший разворот
+ * читался бы как подмена предмета.
+ *
+ * ДЛИТЕЛЬНОСТЬ 620 мс — дольше перелёта камеры (520). Так и надо:
+ * книга должна дораскрыться уже после того, как камера встала, иначе
+ * движение крышки происходит за кадром и его никто не видит.
+ */
+export class BookSpread implements Interactive {
+  readonly mesh: THREE.Mesh
+  private readonly panel: Panel
+  private readonly cover: THREE.Object3D | null
+  private readonly spread: THREE.Mesh
+
+  private spreads: Spread[] = []
+  private index = 0
+  private hits: HitRegion[] = []
+  private dirty = true
+
+  /** 0 — закрыта, 1 — раскрыта. Между ними идёт анимация. */
+  private openness = 0
+  private target = 0
+  private startedAt = 0
+  private from = 0
+  private readonly reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  constructor(mesh: THREE.Mesh, material: THREE.MeshStandardMaterial, root: THREE.Group) {
+    this.mesh = mesh
+    this.spread = mesh
+    this.cover = root.getObjectByName('book-cover') ?? null
+    this.panel = new Panel({
+      material,
+      // Разворот — две страницы формата книги: 2 × 140 на 216 мм. Холст
+      // держит ту же пропорцию, иначе набор поедет по одной оси.
+      width: 1300,
+      height: 1000,
+      // Бумага не светится. Эмиссия здесь минимальная и нужна только
+      // чтобы текст читался в тени крышки, а не проваливался в чёрное.
+      emissive: 0.18,
+    })
+  }
+
+  /* ---------------- Interactive ---------------- */
+
+  hint(): string {
+    return this.spreads.length > 1
+      ? '← → to turn the page · click the edges · esc to close'
+      : 'esc to close'
+  }
+
+  private regionAt(uv: THREE.Vector2): HitRegion | null {
+    if (this.dirty) this.paint()
+    const p = this.panel.toCanvas(uv)
+    for (let i = this.hits.length - 1; i >= 0; i--) {
+      const r = this.hits[i]
+      if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) return r
+    }
+    return null
+  }
+
+  hover(uv: THREE.Vector2 | null): boolean {
+    return uv ? !!this.regionAt(uv) : false
+  }
+
+  click(uv: THREE.Vector2): ClickResult {
+    const hit = this.regionAt(uv)
+    if (!hit) return 'none'
+    if (hit.id === 'next') return this.turn(1) ? 'consumed' : 'none'
+    if (hit.id === 'prev') return this.turn(-1) ? 'consumed' : 'none'
+    return 'none'
+  }
+
+  back(): ClickResult {
+    // Из книги отступать некуда: она либо открыта, либо закрыта. Первый
+    // разворот — не «глубже», чем пятый, и возвращать на него по Esc
+    // значило бы заставить листать заново.
+    return 'exit'
+  }
+
+  arrow(dir: 1 | -1): boolean {
+    return this.turn(dir)
+  }
+
+  scrollBy(dy: number): boolean {
+    // Книгу листают, а не прокручивают. Колесо переворачивает страницу,
+    // но с порогом: у трекпада инерция, и без него один жест пролистывал
+    // бы половину книги.
+    if (Math.abs(dy) < 40) return false
+    return this.turn(dy > 0 ? 1 : -1)
+  }
+
+  key(): boolean {
+    return false
+  }
+
+  reset() {
+    this.setOpen(false)
+    if (this.index !== 0) {
+      this.index = 0
+      this.dirty = true
+    }
+  }
+
+  focusChanged(active: boolean) {
+    this.setOpen(active)
+  }
+
+  private turn(dir: 1 | -1): boolean {
+    const next = Math.min(Math.max(0, this.index + dir), Math.max(0, this.spreads.length - 1))
+    if (next === this.index) return false
+    this.index = next
+    this.dirty = true
+    return true
+  }
+
+  private setOpen(open: boolean) {
+    const t = open ? 1 : 0
+    if (t === this.target) return
+    this.target = t
+    if (this.reduced) {
+      this.openness = t
+      this.apply()
+      return
+    }
+    this.from = this.openness
+    this.startedAt = performance.now()
+  }
+
+  /* ---------------- кадр ---------------- */
+
+  private apply() {
+    if (this.cover) this.cover.rotation.z = Math.PI * this.openness
+    // Разворот появляется, когда крышка уже ушла больше чем наполовину:
+    // раньше он торчал бы сквозь неё.
+    this.spread.visible = this.openness > 0.55
+  }
+
+  private paint() {
+    this.dirty = false
+    const ctx = this.panel.ctx
+    const W = this.panel.width
+    const H = this.panel.height
+    if (!this.spreads.length) {
+      this.spreads = paginate(ctx, W / 2 - 148, H, H / 1000)
+    }
+    this.hits = paintSpread(ctx, W, H, this.spreads, this.index, BOOK.title ?? '')
+    this.panel.uploaded()
+  }
+
+  flush(nowMs: number) {
+    if (this.target !== this.openness && !this.reduced) {
+      const t = Math.min(1, (nowMs - this.startedAt) / 620)
+      // Та же кривая, что у шапки страницы: быстрый старт, мягкая посадка.
+      const e = 1 - Math.pow(1 - t, 3)
+      this.openness = this.from + (this.target - this.from) * e
+      this.apply()
+    }
+    // Рисуем только когда книга раскрыта: закрытую страницу никто не
+    // видит, а холст 1300 × 1000 стоит реальной выгрузки в текстуру.
+    if (this.dirty && this.openness > 0.5) this.paint()
   }
 }
 
@@ -466,7 +825,10 @@ export class Screens {
   /** Планшет. Отдельно от `surfaces`, потому что он не Surface и не
    *  участвует ни в наведении, ни в кликах, ни в игре. */
   tablet: NowPlaying | null = null
-  private byMesh = new Map<THREE.Object3D, Surface>()
+  /** Книга. Отдельно по той же причине, что и планшет: у неё нет ни
+   *  приложений, ни прокрутки документа — только развороты. */
+  book: BookSpread | null = null
+  private byMesh = new Map<THREE.Object3D, Interactive>()
   private lastClock = ''
 
   constructor(scene: THREE.Scene) {
@@ -476,10 +838,22 @@ export class Screens {
       if (!m.isMesh || m.name !== 'screen') return
       const mat = m.material as THREE.MeshStandardMaterial
       let p: THREE.Object3D | null = m.parent
-      while (p && p.name !== 'monitor' && p.name !== 'macbook' && p.name !== 'tablet') p = p.parent
+      while (
+        p &&
+        p.name !== 'monitor' &&
+        p.name !== 'macbook' &&
+        p.name !== 'tablet' &&
+        p.name !== 'book'
+      ) {
+        p = p.parent
+      }
 
-      if (p?.name === 'tablet') {
+      if (p?.name === 'book') {
+        this.book = new BookSpread(m, mat, p as THREE.Group)
+        this.byMesh.set(m, this.book)
+      } else if (p?.name === 'tablet') {
         this.tablet = new NowPlaying(m, mat)
+        this.byMesh.set(m, this.tablet)
       } else if (p?.name === 'monitor') {
         // 2048 × 870 на полотно 0.8 × 0.34 м — около 2.5 пикселя на
         // миллиметр: текст остаётся резким, когда камера подлетает вплотную.
@@ -510,7 +884,7 @@ export class Screens {
     s.mesh.traverse((o) => this.byMesh.set(o, s))
   }
 
-  forMesh(o: THREE.Object3D | null | undefined): Surface | null {
+  forMesh(o: THREE.Object3D | null | undefined): Interactive | null {
     return o ? (this.byMesh.get(o) ?? null) : null
   }
 
@@ -543,9 +917,15 @@ export class Screens {
   flush(nowMs: number) {
     for (const s of this.surfaces) s.flush()
     this.tablet?.flush(nowMs)
+    this.book?.flush(nowMs)
   }
 
   resetAll() {
     for (const s of this.surfaces) s.reset()
+    // Планшет и книга тоже возвращаются к тому виду, в котором их
+    // показывают издалека: список того, что играло, и раскрытая книга
+    // издали читаются как что-то недозакрытое.
+    this.tablet?.reset()
+    this.book?.reset()
   }
 }

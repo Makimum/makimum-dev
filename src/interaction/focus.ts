@@ -9,7 +9,7 @@ import {
   type HotspotSwitch,
   type HotspotSpin,
 } from './hotspots'
-import type { Screens, Surface } from '../screens/screens'
+import type { Interactive, Screens } from '../screens/screens'
 import type { GameKey } from '../screens/tetris'
 
 /**
@@ -90,7 +90,7 @@ export function createFocus(
   const ownerOf = new Map<THREE.Object3D, Hotspot>()
   /** Экран, живущий внутри предмета. У монитора и ноутбука он есть,
    *  у будущих хотспотов (лампа, сертификат) его не будет. */
-  const surfaceOf = new Map<Hotspot, Surface>()
+  const surfaceOf = new Map<Hotspot, Interactive>()
 
   for (const h of hotspots) {
     const root = scene.getObjectByName(h.meshName)
@@ -128,7 +128,7 @@ export function createFocus(
   const pointer = new THREE.Vector2()
   let hovered: Hotspot | null = null
   let active: Hotspot | null = null
-  let activeSurface: Surface | null = null
+  let activeSurface: Interactive | null = null
   let transition: Transition | null = null
   let lastPick = 0
 
@@ -161,19 +161,21 @@ export function createFocus(
     transition = { from: currentPose(), to, start: now, duration: 520, kind }
   }
 
+  // Что написать под кадром, решает сам предмет: у монитора это «click an
+  // app», у планшета «browse what is playing», у книги «turn the page».
+  // Раньше эта цепочка условий жила здесь и разбирала чужое состояние —
+  // и каждый новый экран дописывал бы в неё ветку.
   function setHint() {
     if (!activeSurface) return
-    hint.textContent =
-      activeSurface.view !== 'app'
-        ? 'click an app · esc to leave'
-        : activeSurface.appId === 'tetris'
-          ? '← → move · ↓ soft drop · ↑ rotate · space hard drop · esc to go back'
-          : 'scroll to read · ← → to move · esc to go back'
+    hint.textContent = activeSurface.hint()
   }
 
   function enterFocus(h: Hotspot, now: number) {
     active = h
     activeSurface = surfaceOf.get(h) ?? null
+    // Предмет может измениться сам, а не только картинка на нём: книга
+    // при подлёте открывается.
+    activeSurface?.focusChanged?.(true)
     controls.enabled = false
     hud.style.opacity = '0'
     flyTo(h.pose, now, 'enter')
@@ -184,6 +186,7 @@ export function createFocus(
   function exitFocus() {
     if (!active) return
     active = null
+    activeSurface?.focusChanged?.(false)
     activeSurface = null
     hint.hidden = true
     // Возвращаясь в комнату, оба экрана показывают рабочий стол: издалека
