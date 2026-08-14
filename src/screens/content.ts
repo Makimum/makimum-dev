@@ -39,7 +39,7 @@ export const FACTS = {
   triangles: 79_012,
   /**
    * Весь сайт в gzip, КБ: из вывода `vite build`, сумма всех чанков
-   * (8.84 index.html + 8.87 entry + 328.29 main). Ветка страницы одна на
+   * (8.84 index.html + 8.87 entry + 329.5 main). Ветка страницы одна на
    * оба режима — index.html + entry, без чанка сцены `main-*.js` — весит
    * около 18 КБ: этот кусок и скачивает телефон, потому что комната
    * грузится только динамическим импортом из entry.ts.
@@ -49,7 +49,7 @@ export const FACTS = {
    * не снимает (проверено в `dist/index.html`). То есть каждое объяснение
    * в этой таблице стилей посетитель скачивает.
    */
-  bundleKB: 346,
+  bundleKB: 347,
 }
 
 const nf = new Intl.NumberFormat('en-US')

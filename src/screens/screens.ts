@@ -14,6 +14,7 @@ import { Panel } from './panel'
 import { paintNowPlaying, paintProgress, paintQueue, type ProgressBand } from './nowPlaying'
 import { paginate, paintSpread, type Spread } from './bookPages'
 import { BOOK } from '../constants'
+import { onReducedMotionChange, prefersReducedMotion } from '../lib/reducedMotion'
 import {
   currentElapsed,
   currentTrack,
@@ -665,6 +666,13 @@ export class NowPlaying implements Interactive {
  * книга должна дораскрыться уже после того, как камера встала, иначе
  * движение крышки происходит за кадром и его никто не видит.
  */
+/** Полное сметание страницы. Дольше кроссфейда: у него есть путь,
+ *  который глаз должен успеть проследить. */
+const TURN_FULL_MS = 420
+/** Кроссфейд при просьбе уменьшить движение. Скилл доступности называет
+ *  потолок в 200 мс для замены движения затуханием; берём 160. */
+const TURN_REDUCED_MS = 160
+
 export class BookSpread implements Interactive {
   readonly mesh: THREE.Mesh
   private readonly panel: Panel
@@ -681,7 +689,43 @@ export class BookSpread implements Interactive {
   private target = 0
   private startedAt = 0
   private from = 0
-  private readonly reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  /**
+   * ПЕРЕЛИСТЫВАНИЕ. Разложено по ступеням доступности, а не выключено
+   * целиком под просьбу уменьшить движение.
+   *
+   *  — Полное движение: страница ПРОМЕТАЕТСЯ поперёк разворота, с тенью у
+   *    ведущего края. Это крупное горизонтальное перемещение на всю
+   *    ширину кадра, то есть вестибулярный триггер первой категории.
+   *  — Уменьшенное движение: сметания нет вовсе, вместо него кроссфейд
+   *    160 мс. Перемещения не остаётся, но переход остаётся — иначе
+   *    страница ТЕЛЕПОРТИРУЕТСЯ, а мгновенная подмена дезориентирует не
+   *    меньше движения. Это ровно то же решение, что уже принято для
+   *    мобильной страницы: просьба уменьшить движение — ступени, а не
+   *    выключатель.
+   *
+   * Настройка читается ЖИВОЙ: включив её посреди сессии, человек обязан
+   * получить эффект сразу, а не после перезагрузки вкладки.
+   */
+  private reduced = prefersReducedMotion()
+  private readonly unwatchMotion = onReducedMotionChange((r) => {
+    this.reduced = r
+    // Движение, начатое до переключения, обязано прекратиться, а не
+    // доиграть: человек попросил остановить его именно сейчас.
+    if (r && this.turning) this.finishTurn()
+    if (r && this.target !== this.openness) {
+      this.openness = this.target
+      this.apply()
+    }
+  })
+
+  /** Снимки разворота до и после — для перехода между ними. */
+  private before: HTMLCanvasElement | null = null
+  private after: HTMLCanvasElement | null = null
+  private turning = false
+  private turnStart = 0
+  /** +1 — вперёд, −1 — назад. Определяет, куда метётся страница. */
+  private turnDir: 1 | -1 = 1
 
   constructor(mesh: THREE.Mesh, material: THREE.MeshStandardMaterial, root: THREE.Group) {
     this.mesh = mesh
@@ -767,9 +811,100 @@ export class BookSpread implements Interactive {
   private turn(dir: 1 | -1): boolean {
     const next = Math.min(Math.max(0, this.index + dir), Math.max(0, this.spreads.length - 1))
     if (next === this.index) return false
+
+    // Кадр «до» снимается ДО смены разворота — иначе снимать будет нечего.
+    // Если предыдущий переход ещё идёт, он закрывается: две страницы,
+    // летящие одновременно, читаются как сбой, а не как быстрое листание.
+    if (this.turning) this.finishTurn()
+    this.before = this.snapshot(this.before)
+
     this.index = next
     this.dirty = true
+    this.paint()
+    this.after = this.snapshot(this.after)
+
+    this.turnDir = dir
+    this.turnStart = performance.now()
+    this.turning = true
     return true
+  }
+
+  /** Копия текущего холста панели. Переиспользует буфер: перелистывают
+   *  подряд, и выделять по холсту 1300 × 1000 на каждый лист незачем. */
+  private snapshot(into: HTMLCanvasElement | null): HTMLCanvasElement {
+    const c = into ?? document.createElement('canvas')
+    c.width = this.panel.width
+    c.height = this.panel.height
+    const x = c.getContext('2d')!
+    x.clearRect(0, 0, c.width, c.height)
+    x.drawImage(this.panel.canvas, 0, 0)
+    return c
+  }
+
+  private finishTurn() {
+    this.turning = false
+    if (this.after) {
+      const ctx = this.panel.ctx
+      ctx.globalAlpha = 1
+      ctx.drawImage(this.after, 0, 0)
+      this.panel.uploaded()
+    }
+  }
+
+  /**
+   * Кадр перехода между разворотами.
+   *
+   * Полное движение — сметание: граница едет поперёк разворота, слева от
+   * неё старое, справа новое (для листания назад — наоборот), а на самой
+   * границе лежит тёмная полоса, тень поднятого листа. Уменьшенное —
+   * только прозрачность, без единого пикселя перемещения.
+   */
+  private paintTurn(nowMs: number) {
+    const before = this.before
+    const after = this.after
+    if (!before || !after) return this.finishTurn()
+
+    const dur = this.reduced ? TURN_REDUCED_MS : TURN_FULL_MS
+    const t = Math.min(1, (nowMs - this.turnStart) / dur)
+    const ctx = this.panel.ctx
+    const W = this.panel.width
+    const H = this.panel.height
+
+    if (this.reduced) {
+      // Кроссфейд. Никакого сдвига: движение убрано, переход оставлен.
+      ctx.globalAlpha = 1
+      ctx.drawImage(after, 0, 0)
+      ctx.globalAlpha = 1 - t
+      ctx.drawImage(before, 0, 0)
+      ctx.globalAlpha = 1
+    } else {
+      // Быстрый старт, мягкая посадка — та же кривая, что у шапки
+      // страницы и у раскрытия крышки.
+      const e = 1 - Math.pow(1 - t, 3)
+      // Вперёд: граница едет справа налево, открывая новое из-под старого.
+      const x = this.turnDir > 0 ? W * (1 - e) : W * e
+      ctx.globalAlpha = 1
+      ctx.drawImage(after, 0, 0)
+
+      ctx.save()
+      ctx.beginPath()
+      if (this.turnDir > 0) ctx.rect(0, 0, x, H)
+      else ctx.rect(x, 0, W - x, H)
+      ctx.clip()
+      ctx.drawImage(before, 0, 0)
+      ctx.restore()
+
+      // Тень у ведущего края: без неё это не лист, а стирание.
+      const w = W * 0.055
+      const g = ctx.createLinearGradient(x - this.turnDir * w, 0, x, 0)
+      g.addColorStop(0, 'rgba(30,24,14,0)')
+      g.addColorStop(1, 'rgba(30,24,14,0.35)')
+      ctx.fillStyle = g
+      ctx.fillRect(Math.min(x, x - this.turnDir * w), 0, w, H)
+    }
+
+    this.panel.uploaded()
+    if (t >= 1) this.finishTurn()
   }
 
   private setOpen(open: boolean) {
@@ -814,9 +949,21 @@ export class BookSpread implements Interactive {
       this.openness = this.from + (this.target - this.from) * e
       this.apply()
     }
+    // Переход между разворотами идёт поверх всего остального: он и есть
+    // то, что сейчас на холсте.
+    if (this.turning) {
+      this.paintTurn(nowMs)
+      return
+    }
     // Рисуем только когда книга раскрыта: закрытую страницу никто не
     // видит, а холст 1300 × 1000 стоит реальной выгрузки в текстуру.
     if (this.dirty && this.openness > 0.5) this.paint()
+  }
+
+  /** Отписка от системной настройки. Комната живёт, пока открыта вкладка,
+   *  но висящий слушатель на выгруженной сцене — это утечка. */
+  dispose() {
+    this.unwatchMotion()
   }
 }
 

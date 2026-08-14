@@ -25,7 +25,7 @@
   <img alt="Vite" src="https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white">
   <img alt="Bun" src="https://img.shields.io/badge/Bun-runtime-000?style=flat-square&logo=bun&logoColor=white">
   <img alt="no 3D assets" src="https://img.shields.io/badge/3D%20assets-zero-2f5d63?style=flat-square">
-  <img alt="bundle" src="https://img.shields.io/badge/bundle-346%20KB%20gzip-2f5d63?style=flat-square">
+  <img alt="bundle" src="https://img.shields.io/badge/bundle-347%20KB%20gzip-2f5d63?style=flat-square">
 </p>
 
 ---
@@ -40,7 +40,7 @@ in the bundle**. The chair's mesh fabric is a fragment shader. The page edges
 of the book are a fragment shader. The album art on the tablet is drawn to a
 canvas from a hash of the track title.
 
-That constraint is the whole project. It is also why the bundle is 346 KB
+That constraint is the whole project. It is also why the bundle is 347 KB
 gzipped for a fully lit interior scene, and why every visual decision has to
 be argued in code rather than bought in a store.
 

@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { prefersReducedMotion } from '../lib/reducedMotion'
 
 /**
  * Лампа как единственный предмет в комнате, который отвечает на нажатие.
@@ -135,8 +136,6 @@ export function createLampSwitch(scene: THREE.Scene): LampSwitch | null {
   bulbMat.emissive = new THREE.Color(0x000000)
   if (shadeMat) shadeMat.emissive = new THREE.Color(0x000000)
 
-  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
-
   let on = false
   let level = 0
   let from = 0
@@ -181,7 +180,11 @@ export function createLampSwitch(scene: THREE.Scene): LampSwitch | null {
   function rampTo(next: boolean) {
     if (next === on) return
     on = next
-    if (reduced) {
+    // Спрашиваем СЕЙЧАС, а не при сборке комнаты: переключение настройки
+    // в системе не перезагружает страницу, и снимок, снятый однажды,
+    // оставил бы человека с движением, которое он только что попросил
+    // убрать.
+    if (prefersReducedMotion()) {
       // Промежуточный янтарь — это анимация. При отключённой анимации
       // выключатель обязан быть выключателем: сразу и без хвоста.
       apply(on ? 1 : 0)

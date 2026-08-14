@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { prefersReducedMotion } from '../lib/reducedMotion'
 
 /**
  * Кресло, которое можно раскрутить.
@@ -56,8 +57,6 @@ export function createChairSpin(scene: THREE.Scene): ChairSpin | null {
     return null
   }
 
-  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
-
   let held = false
   let lastX = 0
   let lastT = 0
@@ -88,7 +87,9 @@ export function createChairSpin(scene: THREE.Scene): ChairSpin | null {
       held = false
       // При отключённой анимации выбега нет: кресло стоит там, где
       // отпустили. Вращение остаётся — это управление, а не украшение.
-      if (reduced) {
+      // Живой ответ, а не снимок на загрузке: настройку включают тогда,
+      // когда от движения уже стало плохо.
+      if (prefersReducedMotion()) {
         velocity = 0
         return
       }
