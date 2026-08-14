@@ -98,6 +98,31 @@ export interface Interactive {
   focusChanged?(active: boolean): void
 }
 
+/**
+ * Открыть внешний адрес — единственная дверь наружу из комнаты.
+ *
+ * ПОЧЕМУ СХЕМА ПРОВЕРЯЕТСЯ, ХОТЯ АДРЕС «СВОЙ». У ссылок в документах он
+ * действительно свой — из `content.ts`. А вот у трека он приходит ИЗ
+ * ОТВЕТА API: сегодня это `external_urls.spotify` и всегда https, но
+ * доверять форме чужого ответа — это доверие, а не проверка. Строка вида
+ * `javascript:…`, попавшая в `window.open`, исполняется в контексте
+ * страницы, то есть это уже не «странная ссылка», а выполнение чужого
+ * кода. Две строки здесь закрывают целый класс.
+ *
+ * `noopener,noreferrer` остаётся: без первого открытая вкладка получает
+ * ссылку на наше окно через `window.opener`.
+ */
+function openExternal(url: string) {
+  let parsed: URL
+  try {
+    parsed = new URL(url, location.origin)
+  } catch {
+    return
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return
+  window.open(parsed.href, '_blank', 'noopener,noreferrer')
+}
+
 export class Surface {
   readonly mesh: THREE.Mesh
   /** Холст, текстура и материал — общие с планшетом, см. `Panel`. */
@@ -224,7 +249,7 @@ export class Surface {
       // Ссылка — единственное место, где экран выпускает посетителя
       // наружу, поэтому только новая вкладка и только по явному клику.
       const href = hit.id.slice('link:'.length)
-      window.open(href, '_blank', 'noopener,noreferrer')
+      openExternal(href)
       return 'consumed'
     }
     if (kind === 'scrollto') {
@@ -540,7 +565,7 @@ export class NowPlaying implements Interactive {
       if (!url) return 'none'
       // Наружу — только новая вкладка и только по явному нажатию: это то
       // же правило, что у ссылок в документах на мониторе.
-      window.open(url, '_blank', 'noopener,noreferrer')
+      openExternal(url)
       return 'consumed'
     }
     return 'none'

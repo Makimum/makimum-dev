@@ -1,0 +1,54 @@
+# Заголовки безопасности. Cloudflare Pages читает этот файл из корня
+# собранного каталога; `public/` копируется в `dist/` как есть.
+#
+# ЗАЧЕМ ОНИ САЙТУ БЕЗ ФОРМ И БЕЗ ВХОДА. Сайт статический и ничего не
+# принимает от посетителя — но он ОТКРЫВАЕТ внешние ссылки (Spotify,
+# GitHub, X) и ходит за погодой и за треком. Заголовки ниже ограничивают
+# ровно это: если однажды в код попадёт чужой адрес — через опечатку,
+# через зависимость, через подменённый ответ, — браузер не даст ему
+# исполниться и не даст никуда постучаться.
+#
+# Проверять после каждой правки: curl -sSD- -o /dev/null https://makimum.dev/
+
+/*
+  # Из чего страница вообще имеет право что-то грузить.
+  #
+  # script-src без 'unsafe-inline' — это возможно только потому, что в
+  # index.html нет ни одного инлайнового скрипта: единственный <script>
+  # это модуль по адресу. Проверено grep-ом; если инлайновый появится,
+  # он молча перестанет исполняться, и это правильное поведение —
+  # ослаблять политику под него нельзя.
+  #
+  # style-src с 'unsafe-inline' — вынужденно: вся таблица стилей лежит
+  # инлайном в index.html ради одного запроса на первой загрузке.
+  #
+  # connect-src перечисляет ОБА адреса, куда комната реально ходит:
+  # свой /api/now-playing (это 'self') и погоду Open-Meteo. Больше
+  # никуда — и теперь это не обещание, а ограничение браузера.
+  #
+  # frame-ancestors 'none' заменяет X-Frame-Options: сайт нельзя
+  # положить в чужой iframe и заставить кликать по нему вслепую.
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.open-meteo.com; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
+
+  # Год HSTS с поддоменами. Домен и так отдаётся только по https, но без
+  # этого заголовка ПЕРВЫЙ запрос по http успевает уйти в сеть.
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+  # Дублирует frame-ancestors для старых браузеров, которые CSP не читают.
+  X-Frame-Options: DENY
+
+  # Ни одно из этих разрешений сайту не нужно. Пустой список означает
+  # «не спрашивать даже» — а не «спросить и получить отказ».
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()
+
+  # Ссылки наружу и так открываются с noopener/noreferrer, но реферер
+  # уходит и с обычных переходов. Полный адрес чужому сайту знать незачем.
+  Referrer-Policy: strict-origin-when-cross-origin
+
+  X-Content-Type-Options: nosniff
+
+# Ответ Spotify — не статика: он живёт пятнадцать секунд и не должен
+# оседать в промежуточных кешах дольше, чем задумано в самой функции.
+/api/*
+  X-Content-Type-Options: nosniff
+  X-Robots-Tag: noindex
