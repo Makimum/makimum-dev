@@ -233,26 +233,70 @@ export function grabSignature(
   return { w, h, cols, rows, sig: out }
 }
 
+/** Подпись кадра целиком или только её строка. */
+export type SignatureLike = FrameSignature | string
+
+/**
+ * Достать строку подписи из того, что дали. `null` — «это не подпись».
+ *
+ * Существует из-за ловушки, на которую наступают, следуя документации:
+ * `grab()` отдаёт ОБЪЕКТ, а сравнение принимало СТРОКУ, при том что в
+ * хендоффе пара записана как `grab() · compareFrames(a, b)`. Передача
+ * объектов целиком проходила молча — см. комментарий в `compareSignatures`.
+ */
+function sigOf(v: SignatureLike): string | null {
+  if (typeof v === 'string') return v
+  if (v && typeof v === 'object' && typeof v.sig === 'string') return v.sig
+  return null
+}
+
 /**
  * Расхождение двух подписей кадра, в единицах восьмибитного канала.
  * Возвращает и среднее, и максимум: среднее ловит сдвиг тона по всему
  * кадру, максимум — локальную поломку вроде пропавшего затенения в углу.
+ *
+ * Принимает и объект подписи, и голую строку: `compareFrames(a, b)` после
+ * двух `grab()` — самое естественное употребление, и оно обязано работать.
+ *
+ * ⚠️ ЧЕМ ЭТО БЫЛО ОПАСНО. Раньше сюда принималась только строка. Объекты
+ * проходили охранник (`a.length !== b.length` — это `undefined !== undefined`,
+ * то есть ложь), давали `n = NaN`, цикл не выполнялся НИ РАЗУ, и наружу
+ * уходило `{ ok: true, max: 0 }` — «кадры совпали идеально» при полном
+ * отсутствии сравнения. Ложный зелёный в проверке, которая существует ровно
+ * затем, чтобы ловить изменения картинки. Поймано при приёмке расщепления
+ * флага: настоящее расхождение того же кадра было 0.0157.
+ *
+ * Поэтому непонятный вход теперь ВСЕГДА `ok: false`. Проверка, которая не
+ * умеет проверить, обязана сказать это вслух, а не промолчать успешно.
  */
-export function compareSignatures(a: string, b: string) {
-  if (a.length !== b.length) return { ok: false, reason: 'разная длина подписи' }
+export function compareSignatures(a: SignatureLike, b: SignatureLike) {
+  const sa = sigOf(a)
+  const sb = sigOf(b)
+  if (sa === null || sb === null) {
+    return { ok: false as const, reason: 'это не подпись кадра: нужен результат grab()' }
+  }
+  if (!sa.length) return { ok: false as const, reason: 'пустая подпись' }
+  if (sa.length !== sb.length) return { ok: false as const, reason: 'разная длина подписи' }
+  // Сетка у обеих подписей должна совпадать. Длина это уже гарантирует
+  // (она есть cols × rows × 3), но при объектах можно сказать точнее — и
+  // назвать несовпадение по имени, а не «разная длина».
+  if (typeof a === 'object' && typeof b === 'object' && (a.cols !== b.cols || a.rows !== b.rows)) {
+    return { ok: false as const, reason: `разная сетка: ${a.cols}×${a.rows} против ${b.cols}×${b.rows}` }
+  }
+
   let sum = 0
   let max = 0
   let worstAt = -1
-  const n = a.length / 2
+  const n = sa.length / 2
   for (let i = 0; i < n; i++) {
-    const d = Math.abs(parseInt(a.substr(i * 2, 2), 16) - parseInt(b.substr(i * 2, 2), 16))
+    const d = Math.abs(parseInt(sa.substr(i * 2, 2), 16) - parseInt(sb.substr(i * 2, 2), 16))
     sum += d
     if (d > max) {
       max = d
       worstAt = Math.floor(i / 3)
     }
   }
-  return { ok: true, mean: +(sum / n).toFixed(3), max, worstCell: worstAt, channels: n }
+  return { ok: true as const, mean: +(sum / n).toFixed(4), max, worstCell: worstAt, channels: n }
 }
 
 /**

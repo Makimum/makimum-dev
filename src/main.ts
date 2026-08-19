@@ -14,11 +14,14 @@ import { buildTablet } from './props/tablet'
 import { checkLayout } from './lib/sanity'
 import { bakeBoth, setTimeOfDay, daylightFactor, setLamp } from './bake/timeOfDay'
 import { createFocus } from './interaction/focus'
-import { HOTSPOTS, MOBILE_HOTSPOTS } from './interaction/hotspots'
+import { HOTSPOTS } from './interaction/hotspots'
 import { createPost } from './post/composer'
 import { Screens } from './screens/screens'
 import { FACTS, resetDocCache } from './screens/content'
-import { isRoomOpen } from './lobby'
+import { documentsReadable, isRoomOpen, panelFit, pickHotspots, thriftyRender } from './lobby'
+import { screenRectFromPose } from './interaction/screenRect'
+import { createKeyboardMode } from './interaction/keyboardMode'
+import { createHotspotButtons } from './interaction/hotspotButtons'
 import { mountContent } from './page/mount'
 import { createSky } from './sky/dome'
 import { setNowPlaying, startSpotify } from './screens/spotify'
@@ -42,16 +45,25 @@ const canvas = document.querySelector<HTMLCanvasElement>('#scene')!
  *  в углу читаются как недоделанный сайт, а не как инженерная честность. */
 const DEBUG = new URLSearchParams(location.search).has('debug')
 
-/** Грубый указатель — единственный надёжный признак телефона без разбора
- *  UA-строки. Вычисляется здесь, до создания рендерера, потому что нужен
- *  сразу для antialias, а ниже ещё раз — для профиля теней и цепочки
- *  пост-обработки: одно значение на весь файл вместо нескольких matchMedia. */
-const mobile = matchMedia('(pointer: coarse)').matches
+/**
+ * Сколько можно потратить на кадр. Считается здесь, до создания рендерера,
+ * потому что нужно сразу для antialias, а ниже ещё раз — для профиля теней и
+ * цепочки пост-обработки.
+ *
+ * Решение приходит из `lobby.ts`, а не из своего `matchMedia`: раньше эта
+ * строка была ВТОРЫМ читателем «мобильности» в обход модуля, который в
+ * собственном комментарии утверждает, что решатель один.
+ *
+ * Это ровно ПОЛОВИНА прежнего флага. Вторая половина — «что показывать» —
+ * теперь отвечает отдельно, и у iPad ответы разные: тратить бережно, но
+ * показывать всё. См. `documentsReadable()` ниже.
+ */
+const thrifty = thriftyRender()
 
 // Каждый видимый кадр идёт через композер, а в дефолтный фреймбуфер пишет
 // только полноэкранный квад: MSAA-буфер выделяется и не сглаживает ни одного
 // ребра геометрии. На телефоне это чистая потеря памяти.
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: !mobile })
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !thrifty })
 // Размер НЕ выставляется здесь: `setSize` со стилем по умолчанию
 // печатает инлайновые width/height в пиксельях, а если модуль
 // исполняется до раскладки страницы (или во вкладке в фоне), туда
@@ -128,7 +140,7 @@ function setupLighting() {
   sun.position.set(WINDOW.offsetX - 0.8, WINDOW.sill + WINDOW.height + 1.1, -3.4)
   sun.target.position.set(WINDOW.offsetX, 0.7, 1.4)
   sun.castShadow = true
-  sun.shadow.mapSize.set(mobile ? 1024 : 2048, mobile ? 1024 : 2048)
+  sun.shadow.mapSize.set(thrifty ? 1024 : 2048, thrifty ? 1024 : 2048)
   sun.shadow.camera.left = -3
   sun.shadow.camera.right = 3
   sun.shadow.camera.top = 3.5
@@ -539,6 +551,13 @@ const screens = new Screens(scene)
 // того, что кто-то дошёл до отрисовки планшета. Не настроено или сети
 // нет — планшет играет встроенный трек и никто ничего не замечает.
 startSpotify()
+
+/** Что кликабельно — решает не палец, а ЧИТАЕМОСТЬ. См. `monitorReadable()`
+ *  ниже. Один список на двух читателей: рейкаст и клавиатурный обход обязаны
+ *  видеть одни и те же предметы, иначе Tab уводил бы туда, куда мышь не
+ *  попадает. */
+const activeHotspots = pickHotspots(monitorReadable(), HOTSPOTS)
+
 const focus = createFocus(
   scene,
   camera,
@@ -547,9 +566,61 @@ const focus = createFocus(
   screens,
   lampSwitch ? { lamp: { toggle: () => lampSwitch.toggle(), label: () => lampSwitch.label() } } : {},
   chairSpin ? { chair: chairSpin } : {},
-  // Палец — не мышь: подлёта к экранам на телефоне нет, значит и реестр другой.
-  mobile ? MOBILE_HOTSPOTS : HOTSPOTS,
+  activeHotspots,
 )
+
+/**
+ * Клавиатура проявляется по первому навигационному нажатию — до него в
+ * комнате ничего не меняется. Создаётся здесь, потому что живёт ровно
+ * столько же, сколько сцена: на странице без комнаты обводить нечего.
+ */
+const keyboard = createKeyboardMode()
+
+/**
+ * Кнопки предметов для обхода клавишей. Создаются ПОСЛЕ фокуса, потому что
+ * нажатие на кнопку означает ровно то же, что попадание по предмету
+ * рейкастом, — и дорога у обоих одна, `focus.activate`.
+ */
+const hotspotButtons = createHotspotButtons(
+  activeHotspots,
+  scene,
+  camera,
+  keyboard,
+  (h) => focus.activate(h, true),
+)
+
+/**
+ * Помещается ли на этом экране полотно монитора так, чтобы документы на нём
+ * читались. Считается ПО ЖИВОЙ СЦЕНЕ: берётся настоящий меш полотна и
+ * настоящая поза фокуса, углы проецируются.
+ *
+ * Так, а не двумя константами в `lobby.ts`, потому что любая константа здесь
+ * выводится из НЫНЕШНЕЙ позы монитора и тихо соврёт, как только позу
+ * подвинут. Проверять её при этом нечем: комната просто окажется беднее, а
+ * почему — не видно. Замер `scripts/measure-readability.mjs` снимает те же
+ * числа снаружи и служит сверкой.
+ *
+ * РЕШЕНИЕ СНИМАЕТСЯ В ЛАНДШАФТНОЙ РАСКЛАДКЕ, как бы устройство ни было
+ * повёрнуто сейчас. Реестр строится один раз — `createFocus` кладёт BVH по
+ * каждому мешу, — а планшет в руке поворачивают походя. Решив по портрету,
+ * мы отняли бы у iPad монитор до конца сессии, и поворот экрана уже ничего
+ * не вернул бы. Решив по ландшафту, мы в худшем случае показываем в портрете
+ * обрезанный кадр — а это посетитель чинит сам, повернув устройство.
+ */
+function monitorReadable(): boolean {
+  const monitor = screens.surfaces.find((s) => s.screen === 'monitor')
+  const spot = HOTSPOTS.find((h) => h.id === 'monitor')
+  if (!monitor || !spot) return true
+
+  const w = canvas.clientWidth || window.innerWidth
+  const h = canvas.clientHeight || window.innerHeight
+  if (!w || !h) return true
+  const long = Math.max(w, h)
+  const short = Math.min(w, h)
+
+  const panel = screenRectFromPose(monitor.mesh, camera, spot.pose, long, short)
+  return documentsReadable(panel ? panelFit(panel, long, monitor.canvasHeight) : null)
+}
 
 // Пост-обработка. Ноль ассетов, но именно она убирает ощущение
 // «слишком чистой» картинки: запечённая сцена освещена ровно от края
@@ -565,7 +636,7 @@ const focus = createFocus(
 // Свечение остаётся: это подпись картинки — окно и экраны светятся именно
 // им. Уходят затенение контактов и расфокус; вместе с расфокусом уходит и
 // проход глубины, который существовал только ради него.
-const post = createPost(renderer, scene, camera, mobile ? { ao: false, grade: false } : {})
+const post = createPost(renderer, scene, camera, thrifty ? { ao: false, grade: false } : {})
 
 /** Промер кадра. Обёртки вокруг рендерера ставятся только по первому
  *  вызову `profile()` — до него профайлер не стоит ничего. */
@@ -756,6 +827,9 @@ Object.assign(window as unknown as Record<string, unknown>, {
   grab: () => new Promise((res) => { pendingGrab = res }),
   /** Расхождение двух подписей: среднее и максимум по каналу. */
   compareFrames: compareSignatures,
+  /** Идёт ли человек по комнате с клавиатуры. То же самое видно в разметке
+   *  атрибутом `data-keyboard` на корне. */
+  keyboardMode: () => keyboard.active(),
   dumpCamera: () => ({
     position: camera.position.toArray().map((n) => +n.toFixed(3)),
     target: controls.target.toArray().map((n) => +n.toFixed(3)),
@@ -793,6 +867,10 @@ function frame() {
   focus.update(nowMs)
   lampSwitch?.update(nowMs)
   controls.update()
+  // Кнопки предметов едут за камерой. Сама функция выходит первой строкой,
+  // пока клавиатуру не проявили, — то есть для мыши это один вызов и
+  // сравнение булева.
+  hotspotButtons.sync()
 
   // Дельта снимается РОВНО ОДИН РАЗ за кадр: `Clock.getDelta()` обнуляет
   // счётчик, и второй вызов вернул бы ноль — зерно перестало бы жить, а
@@ -816,7 +894,16 @@ function frame() {
    * ним. Второй кадр стоит один проход один раз за сессию и снимает
    * целый класс «тень не появилась, и непонятно почему».
    */
-  if (frames < 2 || chairSpin?.moving() || lampSwitch?.shadowDirty()) {
+  // Флаги снимаются ДО условия, а не внутри него: `||` коротит, и
+  // `shadowDirty()` — читатель, который флаг СБРАСЫВАЕТ. Спрятанный за
+  // коротким замыканием, он не сбрасывался бы в те кадры, когда едет
+  // кресло, и лампа щёлкала бы тень дважды.
+  const chairMoving = chairSpin?.moving() ?? false
+  // Мгновенный поворот кресла (толчок клавишей при отключённой анимации)
+  // скорости не оставляет, и `moving()` про него не знает.
+  const chairStepped = chairSpin?.shadowDirty() ?? false
+  const lampDirty = lampSwitch?.shadowDirty() ?? false
+  if (frames < 2 || chairMoving || chairStepped || lampDirty) {
     renderer.shadowMap.needsUpdate = true
   }
   // Та же дельта уходит в игру на мониторе — и по той же причине. Тик

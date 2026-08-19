@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="386" viewBox="0 0 880 386" role="img" aria-labelledby="t d">
+  <title id="t">Three Claude Code skills and the artefacts they left in this repository</title>
+  <desc id="d">genjutsu:paint shaped art direction and the design system, checkable in src/lib/palette.check.ts. genjutsu:cast shaped motion, checkable in src/props/chairSpin.ts. design-dna produced the token ramp in src/screens/theme.ts. The result: 349 KB gzip, 79012 triangles, 2 geometry passes per frame, zero downloaded 3D assets, 60 fps at 1440 by 900.</desc>
+
+  <!-- Собственный фон, а не прозрачность: GitHub рендерит README в двух темах,
+       и ни один цвет комнаты не проходит 4.5:1 на обеих (bookCloth 7.33/2.58,
+       floorOak 3.24/5.85). Непрозрачный ink0 снимает вопрос целиком. -->
+  <rect width="880" height="386" rx="4" fill="#0b0e13"/>
+  <rect x="0.5" y="0.5" width="879" height="385" rx="4" fill="none" stroke="rgba(255,255,255,.085)"/>
+
+  <text x="28" y="38" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="10.5" letter-spacing="1.5" fill="#8c919c">THREE SKILLS · WHAT THEY SHAPED · WHERE TO CHECK IT</text>
+  <line x1="28" y1="52" x2="852" y2="52" stroke="rgba(255,255,255,.085)"/>
+
+  <g>
+    <rect x="28" y="76" width="262" height="150" rx="4" fill="#10141c" stroke="rgba(255,255,255,.085)"/>
+    <text x="48" y="108" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="13" fill="#f47726">genjutsu:paint</text>
+    <text x="48" y="134" font-family="-apple-system,system-ui,sans-serif" font-size="13.5" fill="#eae8e3">Art direction, design system</text>
+    <line x1="48" y1="150" x2="270" y2="150" stroke="rgba(255,255,255,.045)"/>
+    <text x="48" y="172" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="11" fill="#8c919c">src/constants.ts · PALETTE</text>
+    <text x="48" y="190" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="11" fill="#8c919c">src/lib/palette.check.ts</text>
+    <text x="48" y="212" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="11" fill="#b8845a">5 rules · 183° hue span</text>
+  </g>
+
+  <g>
+    <rect x="309" y="76" width="262" height="150" rx="4" fill="#10141c" stroke="rgba(255,255,255,.085)"/>
+    <text x="329" y="108" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="13" fill="#f47726">genjutsu:cast</text>
+    <text x="329" y="134" font-family="-apple-system,system-ui,sans-serif" font-size="13.5" fill="#eae8e3">Motion, interaction language</text>
+    <line x1="329" y1="150" x2="551" y2="150" stroke="rgba(255,255,255,.045)"/>
+    <text x="329" y="172" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="11" fill="#8c919c">src/interaction/focus.ts</text>
+    <text x="329" y="190" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="11" fill="#8c919c">src/props/chairSpin.ts</text>
+    <text x="329" y="212" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="11" fill="#b8845a">520 ms flight · τ = 1.05 s</text>
+  </g>
+
+  <g>
+    <rect x="590" y="76" width="262" height="150" rx="4" fill="#10141c" stroke="rgba(255,255,255,.085)"/>
+    <text x="610" y="108" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="13" fill="#f47726">design-dna</text>
+    <text x="610" y="134" font-family="-apple-system,system-ui,sans-serif" font-size="13.5" fill="#eae8e3">Reference → tokens</text>
+    <line x1="610" y1="150" x2="832" y2="150" stroke="rgba(255,255,255,.045)"/>
+    <text x="610" y="172" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="11" fill="#8c919c">src/screens/theme.ts · UI</text>
+    <text x="610" y="190" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="11" fill="#8c919c">src/screens/paint.ts</text>
+    <text x="610" y="212" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="11" fill="#b8845a">one ramp · every screen</text>
+  </g>
+
+  <path d="M440 226 L440 258" stroke="rgba(255,255,255,.085)"/>
+  <path d="M435 252 L440 259 L445 252" fill="none" stroke="#5b616d" stroke-width="1.2"/>
+
+  <rect x="28" y="272" width="824" height="86" rx="4" fill="#181d27" stroke="rgba(255,255,255,.085)"/>
+  <text x="48" y="300" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="10.5" letter-spacing="1.5" fill="#8c919c">THE ROOM · MEASURED, NOT ESTIMATED</text>
+  <text x="48" y="332" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="15" fill="#eae8e3">349 KB</text>
+  <text x="48" y="349" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="10.5" fill="#8c919c">gzip, whole site</text>
+  <text x="216" y="332" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="15" fill="#eae8e3">79 012</text>
+  <text x="216" y="349" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="10.5" fill="#8c919c">triangles in scene</text>
+  <text x="400" y="332" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="15" fill="#eae8e3">2</text>
+  <text x="400" y="349" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="10.5" fill="#8c919c">geometry passes / frame</text>
+  <text x="596" y="332" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="15" fill="#eae8e3">0</text>
+  <text x="596" y="349" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="10.5" fill="#8c919c">downloaded 3D assets</text>
+  <text x="772" y="332" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="15" fill="#b8845a">60</text>
+  <text x="772" y="349" font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="10.5" fill="#8c919c">fps, 1440×900</text>
+</svg>

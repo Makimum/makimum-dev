@@ -49,7 +49,7 @@ export const FACTS = {
    * не снимает (проверено в `dist/index.html`). То есть каждое объяснение
    * в этой таблице стилей посетитель скачивает.
    */
-  bundleKB: 347,
+  bundleKB: 349,
 }
 
 const nf = new Intl.NumberFormat('en-US')

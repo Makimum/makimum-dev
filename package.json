@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "tsc --noEmit && bun run src/page/tree.check.ts && bun run src/screens/tetris.check.ts && bun run src/lib/palette.check.ts"
+    "check": "tsc --noEmit && bun run src/page/tree.check.ts && bun run src/screens/tetris.check.ts && bun run src/lib/palette.check.ts && bun run src/lobby.check.ts && bun run src/lib/profile.check.ts && bun run src/props/chairSpin.check.ts"
   },
   "dependencies": {
     "suncalc": "^2.0.1",

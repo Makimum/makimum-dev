@@ -25,7 +25,7 @@
   <img alt="Vite" src="https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white">
   <img alt="Bun" src="https://img.shields.io/badge/Bun-runtime-000?style=flat-square&logo=bun&logoColor=white">
   <img alt="no 3D assets" src="https://img.shields.io/badge/3D%20assets-zero-2f5d63?style=flat-square">
-  <img alt="bundle" src="https://img.shields.io/badge/bundle-347%20KB%20gzip-2f5d63?style=flat-square">
+  <img alt="bundle" src="https://img.shields.io/badge/bundle-349%20KB%20gzip-2f5d63?style=flat-square">
 </p>
 
 ---
@@ -40,7 +40,7 @@ in the bundle**. The chair's mesh fabric is a fragment shader. The page edges
 of the book are a fragment shader. The album art on the tablet is drawn to a
 canvas from a hash of the track title.
 
-That constraint is the whole project. It is also why the bundle is 347 KB
+That constraint is the whole project. It is also why the bundle is 349 KB
 gzipped for a fully lit interior scene, and why every visual decision has to
 be argued in code rather than bought in a store.
 
@@ -50,7 +50,7 @@ be argued in code rather than bought in a store.
     <td width="50%"><img src="docs/media/room-night.webp" alt="The same room at night, desk lamp on, cold blue light at the window"></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>20:55</b> — golden hour</sub></td>
+    <td align="center"><sub><b>20:45</b> — golden hour</sub></td>
     <td align="center"><sub><b>01:20</b> — the lamp turns itself on</sub></td>
   </tr>
 </table>
@@ -134,6 +134,38 @@ a second time just to get normals it could have been handed.
 The image is unchanged, and that is a measurement rather than a claim: both
 paths were built side by side and compared with a frame signature — mean
 difference 0.066, maximum 1 of 255, i.e. eight-bit rounding.
+
+---
+
+## Built with three Claude Code skills
+
+<p align="center">
+  <img src="docs/media/skills.svg" alt="Three Claude Code skills and the artefacts they left in this repository: genjutsu:paint shaped art direction and the design system, genjutsu:cast shaped motion, design-dna produced the token ramp" width="880">
+</p>
+
+The room was art-directed and animated with skills rather than by eye. What each
+one shaped is below, next to the file where you can check the result. The palette
+in particular is not a claim: `bun run check` fails if the room slides back into
+a single hue, and prints the hue span it measured.
+
+| Skill | What it shaped here | Check it in |
+| --- | --- | --- |
+| [`genjutsu:paint`](https://github.com/AThevon/genjutsu) | Art direction and the design system | [`src/lib/palette.check.ts`](src/lib/palette.check.ts) |
+| [`genjutsu:cast`](https://github.com/AThevon/genjutsu) | Motion: camera flights, chair inertia, page turns | [`src/props/chairSpin.ts`](src/props/chairSpin.ts) |
+| [`design-dna`](https://github.com/zanwei/design-dna) | Reference → the token ramp every in-scene screen uses | [`src/screens/theme.ts`](src/screens/theme.ts) |
+
+`genjutsu:paint` and `genjutsu:cast` ship in the same plugin. `design-dna` is
+installed separately.
+
+The diagram above is drawn in the room's own interface language — the same
+`ink0` ground, the same text ramp, the same accent the monitor and the laptop
+use inside the scene. It sits on an opaque background on purpose: GitHub renders
+this file in two themes, and no colour in the room clears 4.5:1 contrast against
+both of them.
+
+**Want to build your own?** The prompts are in
+[prompt.md](prompt.md) — three of them, one per skill,
+in the order that works. They will not reproduce this room. They produce yours.
 
 ---
 

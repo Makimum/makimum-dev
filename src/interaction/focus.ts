@@ -9,6 +9,8 @@ import {
   type HotspotSwitch,
   type HotspotSpin,
 } from './hotspots'
+import { isCancelChord } from './keyboardMode'
+import { prefersReducedMotion } from '../lib/reducedMotion'
 import type { Interactive, Screens } from '../screens/screens'
 import type { GameKey } from '../screens/tetris'
 
@@ -37,7 +39,19 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast
 const EASE = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
 const EASE_TARGET = (t: number) => 1 - Math.pow(1 - t, 4)
 
-const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
+/*
+ * Здесь стоял свой снимок настройки:
+ *
+ *     const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
+ *
+ * То есть ровно то, ради устранения чего заведён `lib/reducedMotion.ts`:
+ * второй читатель и ответ, снятый ОДИН раз при импорте модуля. Человек,
+ * включивший «уменьшить движение» посреди сессии, продолжал получать
+ * перелёты камеры до перезагрузки вкладки — а настройку включают тогда,
+ * когда от движения уже стало плохо. Кресло, лампа и книга живой ответ
+ * читали; подлёт камеры оказался единственным местом, куда та правка не
+ * дошла.
+ */
 /** Наведения на пальце не существует: подпись показывать некому, а рейкаст
  *  на 30 Гц ради неё — чистая трата кадра. */
 const coarse = matchMedia('(pointer: coarse)').matches
@@ -69,6 +83,12 @@ export interface FocusSystem {
    * мёртвой орбитой.
    */
   exit(): void
+  /**
+   * Нажать на предмет не указателем. Существует ради клавиатуры: у каждого
+   * предмета есть своя кнопка поверх холста, и её `click` обязан означать
+   * ровно то же, что попадание по предмету рейкастом.
+   */
+  activate(h: Hotspot, fromKeyboard?: boolean): void
   dispose(): void
 }
 
@@ -82,7 +102,8 @@ export function createFocus(
   switches: Record<string, HotspotSwitch> = {},
   /** Вращаемые предметы по id хотспота — для kind: 'spin'. */
   spinners: Record<string, HotspotSpin> = {},
-  /** Какой реестр обходить. На телефоне он короче: см. MOBILE_HOTSPOTS. */
+  /** Какой реестр обходить. Там, где документы на мониторе нечитаемы, он
+   *  короче: см. `pickHotspots()` в `src/lobby.ts`. */
   hotspots: Hotspot[] = HOTSPOTS,
 ): FocusSystem {
   // ---- разрешение хотспотов в реальные меши ----
@@ -149,7 +170,10 @@ export function createFocus(
    * 520 мс хватает, чтобы кадр читался как движение, а не как склейка.
    */
   function flyTo(to: CameraPose, now: number, kind: Transition['kind']) {
-    if (reducedMotion) {
+    // Ответ спрашивается В МОМЕНТ ПЕРЕЛЁТА, а не при сборке: настройка
+    // меняется живой, и подписка тут не нужна — вопрос задаётся ровно
+    // тогда, когда от ответа что-то зависит.
+    if (prefersReducedMotion()) {
       camera.position.set(...to.position)
       controls.target.set(...to.target)
       camera.fov = to.fov
@@ -323,6 +347,43 @@ export function createFocus(
     updatePointer(e)
   }
 
+  /**
+   * Что означает «нажали на предмет» — ОДНА дорога для указателя и для
+   * клавиатуры.
+   *
+   * Вынесено из обработчика клика, когда у предметов появились настоящие
+   * кнопки для обхода клавишей Tab. Две копии этой лестницы условий
+   * разошлись бы молча: в одной забыли бы про выключатель без реализации,
+   * в другой — про то, что кресло не реагирует на щелчок, и разницу нашли
+   * бы не раньше, чем кто-нибудь пожалуется.
+   */
+  function activateHotspot(h: Hotspot, fromKeyboard = false) {
+    // Вращаемый предмет реагирует на протаскивание, а не на клик: одиночный
+    // щелчок по нему не делает ничего. А вот нажатие клавиши — делает: у
+    // клавиатуры протаскивания нет вовсе, и без толчка кресло оказалось бы
+    // единственным предметом, до которого клавишей не дотянуться.
+    if (h.kind === 'spin') {
+      if (fromKeyboard) spinners[h.id]?.nudge()
+      return
+    }
+    // Предмет-выключатель срабатывает на месте: камера остаётся там, где
+    // стояла, потому что смотреть надо на комнату, а не на предмет.
+    const sw = h.kind === 'switch' ? switches[h.id] : undefined
+    if (sw) {
+      sw.toggle()
+      // Подпись обновляется тут же: посетитель никуда не уводил ни курсор,
+      // ни фокус, а смысл следующего нажатия уже другой.
+      hud.textContent = sw.label()
+      return
+    }
+    // Выключатель без реализации — всё равно выключатель: у него нет позы
+    // для подлёта, `pose` в реестре стоит формально. Без этой строки
+    // предмет, для которого переключатель не передали (createLampSwitch
+    // вернул null — лампы в сцене не нашлось), уносил бы камеру в фокус.
+    if (h.kind === 'switch') return
+    enterFocus(h, performance.now())
+  }
+
   const onClick = (e: PointerEvent) => {
     // Игнорируется только клик во время ВОЗВРАТА в комнату: под курсором
     // ещё тот предмет, из которого посетитель вышел, и он провалился бы
@@ -345,25 +406,7 @@ export function createFocus(
     if (!active) {
       const h = hit ? ownerOf.get(hit.object) : undefined
       if (!h) return
-      // Предмет-выключатель срабатывает на месте: камера остаётся там,
-      // где стояла, потому что смотреть надо на комнату, а не на предмет.
-      // Вращаемый предмет реагирует на протаскивание, а не на клик:
-      // одиночный щелчок по нему не должен ничего делать.
-      if (h.kind === 'spin') return
-      const sw = h.kind === 'switch' ? switches[h.id] : undefined
-      if (sw) {
-        sw.toggle()
-        // Подпись обновляется тут же, под курсором: посетитель не уводил
-        // мышь, а смысл следующего клика уже другой.
-        hud.textContent = sw.label()
-        return
-      }
-      // Выключатель без реализации — всё равно выключатель: у него нет позы
-      // для подлёта, `pose` в реестре стоит формально. Без этой строки
-      // предмет, для которого переключатель не передали (createLampSwitch
-      // вернул null — лампы в сцене не нашлось), уносил бы камеру в фокус.
-      if (h.kind === 'switch') return
-      enterFocus(h, performance.now())
+      activateHotspot(h)
       return
     }
 
@@ -406,12 +449,38 @@ export function createFocus(
   }
 
   const onKey = (e: KeyboardEvent) => {
-    if (!active) return
-    if (e.key === 'Escape') {
-      if (activeSurface?.back() === 'exit') exitFocus()
-      else setHint()
+    /**
+     * ВЫХОД РАЗБИРАЕТСЯ ДО ПРОВЕРКИ `active`, и это половина задачи.
+     *
+     * Раньше обработчик начинался с `if (!active) return`, то есть клавиши
+     * работали только ПОСЛЕ того, как в предмет уже ткнули указателем.
+     * Клавиатурный посетитель, обошедший комнату по Tab, не мог ничего.
+     *
+     * Cmd + . идёт той же дорогой, что Esc, а не своей: два выхода с разной
+     * механикой — это два выхода, которые разойдутся. Он существует потому,
+     * что клавиши Esc нет на Smart Keyboard Folio и на Magic Keyboard для
+     * iPad 2020–2022; Apple перечисляет состав функционального ряда только
+     * у Magic Keyboard Folio («14-key function row, including an escape
+     * key») и у Magic Keyboard для iPad Pro M4. Перехватывает ли iPadOS
+     * этот аккорд до страницы — НЕ ПРОВЕРЕНО, живого iPad у проекта нет.
+     * Ровно поэтому есть и третий выход, от клавиш не зависящий: крестик
+     * стоит последним в обходе Tab.
+     */
+    if (e.key === 'Escape' || isCancelChord(e)) {
+      if (isCancelChord(e)) e.preventDefault()
+      if (active) {
+        if (activeSurface?.back() === 'exit') exitFocus()
+        else setHint()
+        return
+      }
+      // Вне фокуса выходить неоткуда — значит выход означает «хватит
+      // ходить по комнате клавишей». Снимаем обвод, роняя фокус: следующий
+      // Tab начнёт обход сначала.
+      const el = document.activeElement
+      if (el instanceof HTMLElement && el.classList.contains('hotspot-btn')) el.blur()
       return
     }
+    if (!active) return
     if (!activeSurface) return
     // Игре клавиши предлагаются ПЕРВОЙ: пока тетрис открыт, стрелки
     // достаются ему, а не скроллу документа и не деке. Esc остаётся выше
@@ -505,5 +574,5 @@ export function createFocus(
     for (const m of pickables) m.geometry.disposeBoundsTree?.()
   }
 
-  return { update, exit: leaveFocus, dispose }
+  return { update, exit: leaveFocus, activate: activateHotspot, dispose }
 }
