@@ -154,8 +154,10 @@ a single hue, and prints the hue span it measured.
 | [`genjutsu:cast`](https://github.com/AThevon/genjutsu) | Motion: camera flights, chair inertia, page turns | [`src/props/chairSpin.ts`](src/props/chairSpin.ts) |
 | [`design-dna`](https://github.com/zanwei/design-dna) | Reference → the token ramp every in-scene screen uses | [`src/screens/theme.ts`](src/screens/theme.ts) |
 
-`genjutsu:paint` and `genjutsu:cast` ship in the same plugin. `design-dna` is
-installed separately.
+`genjutsu:paint` and `genjutsu:cast` ship in the same plugin; `design-dna` is
+installed separately. Both are MIT and neither is mine — genjutsu © Adrien
+Thevon, design-dna © the design-dna authors. This room was built with genjutsu
+**3.3.0**; install commands and pinned versions are in [prompt.md](prompt.md).
 
 The diagram above is drawn in the room's own interface language — the same
 `ink0` ground, the same text ramp, the same accent the monitor and the laptop

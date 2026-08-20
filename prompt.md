@@ -15,19 +15,32 @@ and it is also the part most people quit before reaching.
 
 ## Install once
 
+Inside Claude Code:
+
 ```bash
-# genjutsu — paint and cast ship together
 /plugin marketplace add AThevon/genjutsu
 /plugin install genjutsu
 ```
 
+In a terminal:
+
 ```bash
-# design-dna — separate
 npx skills add zanwei/design-dna
 ```
 
-[AThevon/genjutsu](https://github.com/AThevon/genjutsu) ·
-[zanwei/design-dna](https://github.com/zanwei/design-dna)
+That is the whole setup. `genjutsu:paint` and `genjutsu:cast` arrive together in
+one plugin; `design-dna` is a standalone skill.
+
+**Versions this room was built with:** genjutsu **3.3.0**, design-dna as of
+August 2026. Both move — if a prompt below behaves differently from what is
+described, check the skill's own changelog before assuming the prompt is wrong.
+
+**Both are MIT**, and they are not mine:
+[AThevon/genjutsu](https://github.com/AThevon/genjutsu) © Adrien Thevon ·
+[zanwei/design-dna](https://github.com/zanwei/design-dna) © the design-dna
+authors. Install them from the source rather than from a copy — a vendored skill
+is a skill that stops getting fixed, and the issues you file are worth more to
+their authors than to me.
 
 ---
 
